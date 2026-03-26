@@ -6,37 +6,55 @@ import { supabase } from '@/lib/supabase'
 type AnimalStatus = 'healthy' | 'watchlist' | 'critical'
 
 type DbAnimal = {
-  id?: string | null
-  name?: string | null
-  ear_tag?: string | null
-  barn?: string | null
-  status?: string | null
-  created_at?: string | null
+  id: string
+  name: string | null
+  ear_tag: string | null
+  group_name: string | null
+  status: string | null
+  priority: number | null
+  created_at: string | null
 }
 
 type Animal = {
   id: string
   name: string
   earTag: string
-  barn: string
+  groupName: string
   status: AnimalStatus
+  priority: number
 }
 
-function safeStatus(value: string | null | undefined): AnimalStatus {
-  if (value === 'healthy' || value === 'watchlist' || value === 'critical') return value
+function normalizeStatus(value: string | null | undefined): AnimalStatus {
+  if (value === 'healthy' || value === 'watchlist' || value === 'critical') {
+    return value
+  }
   return 'healthy'
 }
 
 function statusLabel(status: AnimalStatus) {
-  if (status === 'healthy') return 'Frisk'
-  if (status === 'watchlist') return 'Bevakning'
-  return 'Kritisk'
+  switch (status) {
+    case 'healthy':
+      return 'Frisk'
+    case 'watchlist':
+      return 'Bevakning'
+    case 'critical':
+      return 'Kritisk'
+    default:
+      return 'Frisk'
+  }
 }
 
 function statusClass(status: AnimalStatus) {
-  if (status === 'healthy') return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-  if (status === 'watchlist') return 'border-amber-500/20 bg-amber-500/10 text-amber-300'
-  return 'border-red-500/20 bg-red-500/10 text-red-300'
+  switch (status) {
+    case 'healthy':
+      return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+    case 'watchlist':
+      return 'border-amber-500/20 bg-amber-500/10 text-amber-300'
+    case 'critical':
+      return 'border-red-500/20 bg-red-500/10 text-red-300'
+    default:
+      return 'border-white/10 bg-white/5 text-slate-300'
+  }
 }
 
 function Sidebar() {
@@ -117,7 +135,7 @@ export default function Page() {
   const [form, setForm] = useState({
     name: '',
     earTag: '',
-    barn: '',
+    groupName: '',
     status: 'healthy' as AnimalStatus,
   })
 
@@ -127,23 +145,24 @@ export default function Page() {
 
     const { data, error } = await supabase
       .from('animals')
-      .select('*')
+      .select('id, name, ear_tag, group_name, status, priority, created_at')
       .order('created_at', { ascending: false })
 
     if (error) {
-      console.error(error)
-      setErrorMessage(`Kunde inte hämta djur: ${error.message}`)
+      console.error('loadAnimals error:', error)
       setAnimals([])
+      setErrorMessage(`Kunde inte hämta djur: ${error.message}`)
       setLoading(false)
       return
     }
 
-    const mapped: Animal[] = ((data ?? []) as DbAnimal[]).map((animal, index) => ({
-      id: animal.id ?? `missing-${index}`,
+    const mapped: Animal[] = ((data ?? []) as DbAnimal[]).map((animal) => ({
+      id: animal.id,
       name: animal.name ?? 'Okänt djur',
       earTag: animal.ear_tag ?? '',
-      barn: animal.barn ?? '',
-      status: safeStatus(animal.status),
+      groupName: animal.group_name ?? '',
+      status: normalizeStatus(animal.status),
+      priority: animal.priority ?? 1,
     }))
 
     setAnimals(mapped)
@@ -154,25 +173,38 @@ export default function Page() {
     loadAnimals()
   }, [])
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setSaving(true)
     setErrorMessage('')
     setSuccessMessage('')
 
-    const payload = {
-      name: form.name,
-      ear_tag: form.earTag,
-      barn: form.barn,
-      status: form.status,
+    if (!form.name.trim()) {
+      setSaving(false)
+      setErrorMessage('Du måste ange namn.')
+      return
     }
 
-    const { error } = await supabase.from('animals').insert(payload)
+    if (!form.groupName.trim()) {
+      setSaving(false)
+      setErrorMessage('Du måste ange ladugård.')
+      return
+    }
+
+    const payload = {
+      name: form.name.trim(),
+      ear_tag: form.earTag.trim() || null,
+      group_name: form.groupName.trim(),
+      status: form.status,
+      priority: 1,
+    }
+
+    const { error } = await supabase.from('animals').insert([payload])
 
     setSaving(false)
 
     if (error) {
-      console.error(error)
+      console.error('insert error:', error)
       setErrorMessage(`Kunde inte spara djuret: ${error.message}`)
       return
     }
@@ -181,7 +213,7 @@ export default function Page() {
     setForm({
       name: '',
       earTag: '',
-      barn: '',
+      groupName: '',
       status: 'healthy',
     })
 
@@ -212,22 +244,26 @@ export default function Page() {
           <TopHeader totalAnimals={animals.length} />
 
           <div className="mx-auto max-w-[1600px] px-6 py-8">
-            {errorMessage && (
+            {errorMessage ? (
               <div className="mb-6 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-red-300">
                 {errorMessage}
               </div>
-            )}
+            ) : null}
 
-            {successMessage && (
+            {successMessage ? (
               <div className="mb-6 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-emerald-300">
                 {successMessage}
               </div>
-            )}
+            ) : null}
 
             <section className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
               <MetricCard title="Totalt" value={animals.length} />
               <MetricCard title="Friska" value={healthyCount} valueClassName="text-emerald-400" />
-              <MetricCard title="Bevakning" value={watchlistCount} valueClassName="text-amber-400" />
+              <MetricCard
+                title="Bevakning"
+                value={watchlistCount}
+                valueClassName="text-amber-400"
+              />
               <MetricCard title="Kritiska" value={criticalCount} valueClassName="text-red-400" />
             </section>
 
@@ -239,7 +275,12 @@ export default function Page() {
                 <form onSubmit={handleSubmit} className="mt-6 grid gap-4 md:grid-cols-2">
                   <input
                     value={form.name}
-                    onChange={(e) => setForm((v) => ({ ...v, name: e.target.value }))}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        name: e.target.value,
+                      }))
+                    }
                     placeholder="Namn"
                     required
                     className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none"
@@ -247,21 +288,37 @@ export default function Page() {
 
                   <input
                     value={form.earTag}
-                    onChange={(e) => setForm((v) => ({ ...v, earTag: e.target.value }))}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        earTag: e.target.value,
+                      }))
+                    }
                     placeholder="Öronmärke"
                     className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none"
                   />
 
                   <input
-                    value={form.barn}
-                    onChange={(e) => setForm((v) => ({ ...v, barn: e.target.value }))}
+                    value={form.groupName}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        groupName: e.target.value,
+                      }))
+                    }
                     placeholder="Ladugård"
+                    required
                     className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none"
                   />
 
                   <select
                     value={form.status}
-                    onChange={(e) => setForm((v) => ({ ...v, status: e.target.value as AnimalStatus }))}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        status: e.target.value as AnimalStatus,
+                      }))
+                    }
                     className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none"
                   >
                     <option value="healthy">Frisk</option>
@@ -269,11 +326,11 @@ export default function Page() {
                     <option value="critical">Kritisk</option>
                   </select>
 
-                  <div className="md:col-span-2 flex gap-3">
+                  <div className="flex gap-3 md:col-span-2">
                     <button
                       type="submit"
                       disabled={saving}
-                      className="rounded-2xl border border-[#c8a96b]/20 bg-[#c8a96b]/10 px-5 py-3 text-[#eddcb8] transition hover:bg-[#c8a96b]/20"
+                      className="rounded-2xl border border-[#c8a96b]/20 bg-[#c8a96b]/10 px-5 py-3 text-[#eddcb8] transition hover:bg-[#c8a96b]/20 disabled:opacity-60"
                     >
                       {saving ? 'Sparar...' : 'Skapa djur'}
                     </button>
@@ -284,7 +341,7 @@ export default function Page() {
                         setForm({
                           name: '',
                           earTag: '',
-                          barn: '',
+                          groupName: '',
                           status: 'healthy',
                         })
                       }
@@ -319,7 +376,9 @@ export default function Page() {
                           <div>
                             <div className="flex items-center gap-3">
                               <div className="text-xl font-semibold text-white">{animal.name}</div>
-                              <span className={`rounded-full border px-3 py-1 text-sm ${statusClass(animal.status)}`}>
+                              <span
+                                className={`rounded-full border px-3 py-1 text-sm ${statusClass(animal.status)}`}
+                              >
                                 {statusLabel(animal.status)}
                               </span>
                             </div>
@@ -328,7 +387,7 @@ export default function Page() {
                               Öronmärke: {animal.earTag || '–'}
                             </div>
                             <div className="mt-1 text-sm text-slate-400">
-                              Ladugård: {animal.barn || '–'}
+                              Ladugård: {animal.groupName || '–'}
                             </div>
                           </div>
 
@@ -344,7 +403,7 @@ export default function Page() {
             </section>
 
             <div className="mt-8 rounded-[2rem] border border-[#c8a96b]/20 bg-[#c8a96b]/10 p-6 text-[#eddcb8]">
-              Nästa steg efter reset: lägga till redigera, ta bort, uppgifter och riktig kundinmatning för fler delar.
+              Nästa steg: redigera, ta bort, uppgifter och riktig kundinmatning.
             </div>
           </div>
         </div>
@@ -352,4 +411,3 @@ export default function Page() {
     </main>
   )
 }
-
