@@ -13,6 +13,7 @@ type MailCategory =
 type TaskStatus = 'today' | 'upcoming' | 'overdue' | 'done'
 type DocumentType = 'Faktura' | 'Avtal' | 'Journal' | 'Försäkring' | 'Service'
 type LogSeverity = 'info' | 'warning' | 'critical'
+type Section = 'overview' | 'animals' | 'inbox' | 'tasks' | 'documents' | 'log'
 
 type Animal = {
   id: string
@@ -37,6 +38,7 @@ type InboxMail = {
   receivedAt: string
   unread: boolean
   important: boolean
+  linkedAnimalId?: string
 }
 
 type FarmTask = {
@@ -164,6 +166,7 @@ const inboxSeed: InboxMail[] = [
     receivedAt: '08:12',
     unread: true,
     important: true,
+    linkedAnimalId: 'a1',
   },
   {
     id: 'm2',
@@ -222,6 +225,7 @@ const tasksSeed: FarmTask[] = [
     owner: 'Johan',
     due: 'Idag 11:00',
     status: 'today',
+    relatedTo: 'Rosa 14',
   },
   {
     id: 't3',
@@ -344,6 +348,34 @@ const suppliersSeed: Supplier[] = [
   },
 ]
 
+const sectionLabels: Record<Section, string> = {
+  overview: 'Översikt',
+  animals: 'Djur',
+  inbox: 'Inkorg',
+  tasks: 'Uppgifter',
+  documents: 'Dokument',
+  log: 'Gårdslogg',
+}
+
+function getAnimalStatusLabel(status: AnimalStatus) {
+  if (status === 'healthy') return 'Frisk'
+  if (status === 'watchlist') return 'Bevakning'
+  return 'Kritisk'
+}
+
+function getTaskStatusLabel(status: TaskStatus) {
+  if (status === 'today') return 'Idag'
+  if (status === 'upcoming') return 'Kommande'
+  if (status === 'overdue') return 'Försenad'
+  return 'Klar'
+}
+
+function getLogSeverityLabel(severity: LogSeverity) {
+  if (severity === 'info') return 'Info'
+  if (severity === 'warning') return 'Varning'
+  return 'Kritisk'
+}
+
 function statusPill(status: AnimalStatus) {
   if (status === 'healthy') return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
   if (status === 'watchlist') return 'border-amber-500/20 bg-amber-500/10 text-amber-300'
@@ -363,17 +395,410 @@ function logPill(severity: LogSeverity) {
   return 'bg-red-500/10 text-red-300 border-red-500/20'
 }
 
-export default function Page() {
-  const [activeSection, setActiveSection] = useState<
-    'overview' | 'animals' | 'inbox' | 'tasks' | 'documents' | 'log'
-  >('overview')
+function Sidebar({
+  activeSection,
+  setActiveSection,
+  unreadCount,
+}: {
+  activeSection: Section
+  setActiveSection: (section: Section) => void
+  unreadCount: number
+}) {
+  const sections: Section[] = ['overview', 'animals', 'inbox', 'tasks', 'documents', 'log']
 
-  const [animals] = useState<Animal[]>(animalsSeed)
-  const [inbox] = useState<InboxMail[]>(inboxSeed)
-  const [tasks] = useState<FarmTask[]>(tasksSeed)
-  const [documents] = useState<FarmDocument[]>(documentsSeed)
-  const [logs] = useState<FarmLog[]>(logsSeed)
-  const [suppliers] = useState<Supplier[]>(suppliersSeed)
+  return (
+    <aside className="hidden w-[290px] border-r border-white/10 bg-[#06101b] xl:flex xl:flex-col">
+      <div className="border-b border-white/10 px-8 py-7">
+        <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Bionimal Pulse</div>
+        <div className="mt-2 text-2xl font-semibold text-white">Farm OS</div>
+        <p className="mt-3 text-sm text-slate-400">
+          Samlat arbetsverktyg för djur, administration och kommunikation.
+        </p>
+      </div>
+
+      <div className="flex-1 px-5 py-6">
+        <div className="space-y-2">
+          {sections.map((section) => {
+            const isActive = activeSection === section
+
+            return (
+              <button
+                key={section}
+                onClick={() => setActiveSection(section)}
+                className={`w-full rounded-2xl px-4 py-3 text-left transition ${
+                  isActive
+                    ? 'border border-[#c8a96b]/20 bg-[#c8a96b]/10 text-[#eddcb8]'
+                    : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                {sectionLabels[section]}
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="mt-8 rounded-3xl border border-white/10 bg-white/5 p-5">
+          <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Dagens fokus</div>
+          <div className="mt-3 space-y-3 text-sm text-slate-300">
+            <div>• Kontrollera Rosa 14 manuellt</div>
+            <div>• Svara veterinär</div>
+            <div>• Attestera servicefaktura</div>
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-3xl border border-white/10 bg-white/5 p-5">
+          <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Inkorg</div>
+          <div className="mt-3 text-4xl font-semibold text-white">{unreadCount}</div>
+          <div className="mt-2 text-sm text-slate-400">olästa mail</div>
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+function TopHeader({ activeSection, totalAnimals, criticalCount }: { activeSection: Section; totalAnimals: number; criticalCount: number }) {
+  return (
+    <header className="border-b border-white/10 bg-[#0a1523]/80 backdrop-blur-xl">
+      <div className="mx-auto flex max-w-[1600px] items-center justify-between px-6 py-5">
+        <div>
+          <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Bondens operativa center</div>
+          <h1 className="mt-1 text-2xl font-semibold text-white">{sectionLabels[activeSection]}</h1>
+        </div>
+
+        <div className="rounded-2xl border border-[#c8a96b]/20 bg-[#c8a96b]/10 px-4 py-2 text-sm text-[#eddcb8]">
+          {totalAnimals} djur totalt · {criticalCount} kritisk avvikelse idag
+        </div>
+      </div>
+    </header>
+  )
+}
+
+function MetricCard({ title, value, valueClassName = 'text-white' }: { title: string; value: string | number; valueClassName?: string }) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-[#0c1726] p-6 shadow-xl">
+      <div className="text-sm uppercase tracking-[0.2em] text-slate-500">{title}</div>
+      <div className={`mt-4 text-5xl font-semibold ${valueClassName}`}>{value}</div>
+    </div>
+  )
+}
+
+function SectionCard({ eyebrow, title, children }: { eyebrow: string; title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
+      <div className="text-sm uppercase tracking-[0.24em] text-slate-500">{eyebrow}</div>
+      <h2 className="mt-2 text-3xl font-semibold text-white">{title}</h2>
+      <div className="mt-6">{children}</div>
+    </div>
+  )
+}
+
+function AnimalsPanel({ animals, onSelectAnimal, selectedAnimalId }: { animals: Animal[]; onSelectAnimal: (animalId: string) => void; selectedAnimalId?: string }) {
+  return (
+    <SectionCard eyebrow="Djur" title="Alla djur och status">
+      <div className="space-y-3">
+        {animals.map((animal) => {
+          const isSelected = selectedAnimalId === animal.id
+
+          return (
+            <button
+              key={animal.id}
+              onClick={() => onSelectAnimal(animal.id)}
+              className={`w-full rounded-3xl border p-5 text-left transition ${
+                isSelected
+                  ? 'border-[#c8a96b]/30 bg-[#c8a96b]/10'
+                  : 'border-white/10 bg-[#0a1320] hover:border-white/20 hover:bg-white/[0.04]'
+              }`}
+            >
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-xl font-semibold text-white">{animal.name}</div>
+                    <span className={`rounded-full border px-3 py-1 text-sm ${statusPill(animal.status)}`}>
+                      {getAnimalStatusLabel(animal.status)}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 text-sm text-slate-400">
+                    {animal.earTag} · {animal.barn} · {animal.group}
+                  </div>
+                  <div className="mt-3 text-slate-200">{animal.deviation}</div>
+                  <div className="mt-2 text-sm text-slate-400">
+                    Senaste observation: {animal.lastObservation}
+                  </div>
+                </div>
+
+                <div className="min-w-[180px] rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-sm text-slate-400">Batteri</div>
+                  <div className="mt-1 text-3xl font-semibold text-white">{animal.battery}%</div>
+                  <div className="mt-2 text-sm text-slate-400">Ansvarig: {animal.assignedTo}</div>
+                </div>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </SectionCard>
+  )
+}
+
+function InboxPanel({
+  inbox,
+  animals,
+  onToggleRead,
+}: {
+  inbox: InboxMail[]
+  animals: Animal[]
+  onToggleRead: (mailId: string) => void
+}) {
+  return (
+    <SectionCard eyebrow="Inkorg" title="Samlade viktiga mail">
+      <div className="space-y-3">
+        {inbox.map((mail) => {
+          const linkedAnimal = animals.find((animal) => animal.id === mail.linkedAnimalId)
+
+          return (
+            <div key={mail.id} className="rounded-2xl border border-white/10 bg-[#0a1320] p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="font-medium text-white">{mail.subject}</div>
+                    {mail.unread && (
+                      <span className="rounded-full bg-sky-500/10 px-2 py-1 text-xs text-sky-300">Oläst</span>
+                    )}
+                    {mail.important && (
+                      <span className="rounded-full bg-red-500/10 px-2 py-1 text-xs text-red-300">Viktigt</span>
+                    )}
+                    {linkedAnimal && (
+                      <span className="rounded-full bg-amber-500/10 px-2 py-1 text-xs text-amber-300">
+                        Kopplat till {linkedAnimal.name}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-2 text-sm text-slate-400">{mail.from} · {mail.category}</div>
+                  <div className="mt-2 text-slate-300">{mail.preview}</div>
+                </div>
+
+                <div className="flex flex-col items-end gap-3">
+                  <div className="whitespace-nowrap text-sm text-slate-500">{mail.receivedAt}</div>
+                  <button
+                    onClick={() => onToggleRead(mail.id)}
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300 transition hover:bg-white/10 hover:text-white"
+                  >
+                    {mail.unread ? 'Markera läst' : 'Markera oläst'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </SectionCard>
+  )
+}
+
+function TasksPanel({ tasks, onToggleTaskDone }: { tasks: FarmTask[]; onToggleTaskDone: (taskId: string) => void }) {
+  return (
+    <SectionCard eyebrow="Uppgifter" title="Dagens arbetslista">
+      <div className="space-y-3">
+        {tasks.map((task) => (
+          <div key={task.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className={`text-white ${task.status === 'done' ? 'opacity-60 line-through' : ''}`}>{task.title}</div>
+                <div className="mt-2 text-sm text-slate-400">
+                  {task.owner} · {task.due}
+                  {task.relatedTo ? ` · ${task.relatedTo}` : ''}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className={`rounded-full border px-3 py-1 text-sm ${taskPill(task.status)}`}>
+                  {getTaskStatusLabel(task.status)}
+                </span>
+                <button
+                  onClick={() => onToggleTaskDone(task.id)}
+                  className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300 transition hover:bg-white/10 hover:text-white"
+                >
+                  {task.status === 'done' ? 'Återställ' : 'Klarmarkera'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </SectionCard>
+  )
+}
+
+function DocumentsPanel({ documents }: { documents: FarmDocument[] }) {
+  return (
+    <SectionCard eyebrow="Dokument och underlag" title="Senaste dokument">
+      <div className="space-y-3">
+        {documents.map((doc) => (
+          <div key={doc.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="font-medium text-white">{doc.name}</div>
+                <div className="mt-2 text-sm text-slate-400">
+                  {doc.type} · {doc.linkedTo} · Källa: {doc.source}
+                </div>
+              </div>
+              <div className="text-sm text-slate-500">{doc.updatedAt}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </SectionCard>
+  )
+}
+
+function LogsPanel({ logs }: { logs: FarmLog[] }) {
+  return (
+    <SectionCard eyebrow="Gårdslogg" title="Senaste händelser och åtgärder">
+      <div className="space-y-3">
+        {logs.map((log) => (
+          <div key={log.id} className="rounded-2xl border border-white/10 bg-[#0a1320] p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-3">
+                  <div className="font-medium text-white">{log.title}</div>
+                  <span className={`rounded-full border px-2 py-1 text-xs ${logPill(log.severity)}`}>
+                    {getLogSeverityLabel(log.severity)}
+                  </span>
+                </div>
+                <div className="mt-2 text-slate-300">{log.detail}</div>
+              </div>
+              <div className="text-sm text-slate-500">{log.time}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </SectionCard>
+  )
+}
+
+function SuppliersPanel({ suppliers }: { suppliers: Supplier[] }) {
+  return (
+    <SectionCard eyebrow="Leverantörer och kontakter" title="Nästa administrativa steg">
+      <div className="space-y-3">
+        {suppliers.map((supplier) => (
+          <div key={supplier.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div className="font-medium text-white">{supplier.name}</div>
+            <div className="mt-2 text-sm text-slate-400">
+              {supplier.category} · {supplier.contact}
+            </div>
+            <div className="mt-3 text-slate-300">{supplier.nextAction}</div>
+          </div>
+        ))}
+      </div>
+    </SectionCard>
+  )
+}
+
+function AnimalDetailPanel({ animal, relatedMails, relatedTasks, relatedDocuments }: {
+  animal?: Animal
+  relatedMails: InboxMail[]
+  relatedTasks: FarmTask[]
+  relatedDocuments: FarmDocument[]
+}) {
+  if (!animal) {
+    return (
+      <SectionCard eyebrow="Djurdetalj" title="Välj ett djur">
+        <div className="text-slate-400">Välj ett djur i listan för att se relaterade mail, uppgifter och dokument.</div>
+      </SectionCard>
+    )
+  }
+
+  return (
+    <SectionCard eyebrow="Djurdetalj" title={animal.name}>
+      <div className="space-y-6">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className={`rounded-full border px-3 py-1 text-sm ${statusPill(animal.status)}`}>
+              {getAnimalStatusLabel(animal.status)}
+            </span>
+            <span className="rounded-full border border-white/10 px-3 py-1 text-sm text-slate-300">
+              {animal.earTag}
+            </span>
+            <span className="rounded-full border border-white/10 px-3 py-1 text-sm text-slate-300">
+              {animal.barn}
+            </span>
+          </div>
+          <div className="mt-4 grid gap-3 text-sm text-slate-300 md:grid-cols-2">
+            <div>Grupp: {animal.group}</div>
+            <div>Ansvarig: {animal.assignedTo}</div>
+            <div>Batteri: {animal.battery}%</div>
+            <div>Prioritet: {animal.priority}</div>
+          </div>
+          <div className="mt-4 text-slate-200">{animal.deviation}</div>
+          <div className="mt-2 text-sm text-slate-400">Senaste observation: {animal.lastObservation}</div>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-3">
+          <div className="rounded-2xl border border-white/10 bg-[#0a1320] p-4">
+            <div className="text-sm uppercase tracking-[0.16em] text-slate-500">Relaterade mail</div>
+            <div className="mt-4 space-y-3">
+              {relatedMails.length === 0 ? (
+                <div className="text-sm text-slate-400">Inga relaterade mail.</div>
+              ) : (
+                relatedMails.map((mail) => (
+                  <div key={mail.id} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                    <div className="text-sm font-medium text-white">{mail.subject}</div>
+                    <div className="mt-1 text-xs text-slate-400">{mail.from}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-[#0a1320] p-4">
+            <div className="text-sm uppercase tracking-[0.16em] text-slate-500">Relaterade uppgifter</div>
+            <div className="mt-4 space-y-3">
+              {relatedTasks.length === 0 ? (
+                <div className="text-sm text-slate-400">Inga relaterade uppgifter.</div>
+              ) : (
+                relatedTasks.map((task) => (
+                  <div key={task.id} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                    <div className="text-sm font-medium text-white">{task.title}</div>
+                    <div className="mt-1 text-xs text-slate-400">{task.due}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-[#0a1320] p-4">
+            <div className="text-sm uppercase tracking-[0.16em] text-slate-500">Relaterade dokument</div>
+            <div className="mt-4 space-y-3">
+              {relatedDocuments.length === 0 ? (
+                <div className="text-sm text-slate-400">Inga relaterade dokument.</div>
+              ) : (
+                relatedDocuments.map((doc) => (
+                  <div key={doc.id} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                    <div className="text-sm font-medium text-white">{doc.name}</div>
+                    <div className="mt-1 text-xs text-slate-400">{doc.type}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </SectionCard>
+  )
+}
+
+export default function Page() {
+  const animals = animalsSeed
+  const documents = documentsSeed
+  const logs = logsSeed
+  const suppliers = suppliersSeed
+
+  const [activeSection, setActiveSection] = useState<Section>('overview')
+  const [selectedAnimalId, setSelectedAnimalId] = useState<string>('a1')
+  const [inbox, setInbox] = useState<InboxMail[]>(inboxSeed)
+  const [tasks, setTasks] = useState<FarmTask[]>(tasksSeed)
 
   const criticalAnimals = useMemo(
     () => animals.filter((animal) => animal.status === 'critical'),
@@ -395,387 +820,175 @@ export default function Page() {
     return Math.round(total / animals.length)
   }, [animals])
 
+  const selectedAnimal = useMemo(
+    () => animals.find((animal) => animal.id === selectedAnimalId),
+    [animals, selectedAnimalId]
+  )
+
+  const relatedMails = useMemo(
+    () => inbox.filter((mail) => mail.linkedAnimalId === selectedAnimalId),
+    [inbox, selectedAnimalId]
+  )
+
+  const relatedTasks = useMemo(
+    () => tasks.filter((task) => task.relatedTo === selectedAnimal?.name),
+    [tasks, selectedAnimal]
+  )
+
+  const relatedDocuments = useMemo(
+    () => documents.filter((doc) => doc.linkedTo === selectedAnimal?.name),
+    [documents, selectedAnimal]
+  )
+
+  function handleToggleRead(mailId: string) {
+    setInbox((current) =>
+      current.map((mail) =>
+        mail.id === mailId ? { ...mail, unread: !mail.unread } : mail
+      )
+    )
+  }
+
+  function handleToggleTaskDone(taskId: string) {
+    setTasks((current) =>
+      current.map((task) => {
+        if (task.id !== taskId) return task
+        return { ...task, status: task.status === 'done' ? 'today' : 'done' }
+      })
+    )
+  }
+
+  function renderSection() {
+    if (activeSection === 'animals') {
+      return (
+        <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[1.2fr_0.8fr]">
+          <AnimalsPanel
+            animals={animals}
+            onSelectAnimal={setSelectedAnimalId}
+            selectedAnimalId={selectedAnimalId}
+          />
+          <AnimalDetailPanel
+            animal={selectedAnimal}
+            relatedMails={relatedMails}
+            relatedTasks={relatedTasks}
+            relatedDocuments={relatedDocuments}
+          />
+        </div>
+      )
+    }
+
+    if (activeSection === 'inbox') {
+      return <InboxPanel inbox={inbox} animals={animals} onToggleRead={handleToggleRead} />
+    }
+
+    if (activeSection === 'tasks') {
+      return <TasksPanel tasks={tasks} onToggleTaskDone={handleToggleTaskDone} />
+    }
+
+    if (activeSection === 'documents') {
+      return <DocumentsPanel documents={documents} />
+    }
+
+    if (activeSection === 'log') {
+      return (
+        <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[1fr_0.9fr]">
+          <LogsPanel logs={logs} />
+          <SuppliersPanel suppliers={suppliers} />
+        </div>
+      )
+    }
+
+    return (
+      <>
+        <section className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
+          <MetricCard title="Aktiva djur" value={animals.length} />
+          <MetricCard title="Kritiska" value={criticalAnimals.length} valueClassName="text-red-400" />
+          <MetricCard title="Bevakning" value={watchlistAnimals.length} valueClassName="text-amber-400" />
+          <MetricCard title="Olästa mail" value={unreadMails.length} valueClassName="text-sky-400" />
+          <MetricCard title="Viktiga mail" value={importantMails.length} valueClassName="text-[#eddcb8]" />
+          <MetricCard title="Snittbatteri" value={`${avgBattery}%`} />
+        </section>
+
+        <section className="mb-8 grid grid-cols-1 gap-6 2xl:grid-cols-[1.2fr_0.8fr]">
+          <SectionCard eyebrow="Prioriterade djur idag" title="Det här behöver mest uppmärksamhet">
+            <div className="space-y-4">
+              {animals
+                .filter((animal) => animal.priority !== 'Låg')
+                .map((animal) => (
+                  <button
+                    key={animal.id}
+                    onClick={() => {
+                      setSelectedAnimalId(animal.id)
+                      setActiveSection('animals')
+                    }}
+                    className="w-full rounded-3xl border border-white/10 bg-[#0a1320] p-5 text-left transition hover:border-white/20 hover:bg-white/[0.04]"
+                  >
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <div className="flex items-center gap-3">
+                          <div className="text-xl font-semibold text-white">{animal.name}</div>
+                          <span className={`rounded-full border px-3 py-1 text-sm ${statusPill(animal.status)}`}>
+                            {getAnimalStatusLabel(animal.status)}
+                          </span>
+                        </div>
+
+                        <div className="mt-3 text-sm text-slate-400">
+                          {animal.earTag} · {animal.barn} · {animal.group}
+                        </div>
+                        <div className="mt-3 text-slate-200">{animal.deviation}</div>
+                        <div className="mt-2 text-sm text-slate-400">
+                          Senaste observation: {animal.lastObservation}
+                        </div>
+                      </div>
+
+                      <div className="min-w-[180px] rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div className="text-sm text-slate-400">Batteri</div>
+                        <div className="mt-1 text-3xl font-semibold text-white">{animal.battery}%</div>
+                        <div className="mt-2 text-sm text-slate-400">Ansvarig: {animal.assignedTo}</div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+            </div>
+          </SectionCard>
+
+          <TasksPanel tasks={tasks} onToggleTaskDone={handleToggleTaskDone} />
+        </section>
+
+        <section className="mb-8 grid grid-cols-1 gap-6 2xl:grid-cols-[1fr_1fr]">
+          <InboxPanel inbox={inbox.slice(0, 4)} animals={animals} onToggleRead={handleToggleRead} />
+          <DocumentsPanel documents={documents} />
+        </section>
+
+        <section className="grid grid-cols-1 gap-6 2xl:grid-cols-[1fr_0.9fr]">
+          <LogsPanel logs={logs} />
+          <SuppliersPanel suppliers={suppliers} />
+        </section>
+      </>
+    )
+  }
+
   return (
     <main className="min-h-screen bg-[#08111d] text-white">
       <div className="flex min-h-screen">
-        <aside className="hidden w-[290px] border-r border-white/10 bg-[#06101b] xl:flex xl:flex-col">
-          <div className="border-b border-white/10 px-8 py-7">
-            <div className="text-xs uppercase tracking-[0.28em] text-slate-500">
-              Bionimal Pulse
-            </div>
-            <div className="mt-2 text-2xl font-semibold text-white">Farm OS</div>
-            <p className="mt-3 text-sm text-slate-400">
-              Samlat arbetsverktyg för djur, administration och kommunikation.
-            </p>
-          </div>
-
-          <div className="flex-1 px-5 py-6">
-            <div className="space-y-2">
-              <button
-                onClick={() => setActiveSection('overview')}
-                className={`w-full rounded-2xl px-4 py-3 text-left ${
-                  activeSection === 'overview'
-                    ? 'border border-[#c8a96b]/20 bg-[#c8a96b]/10 text-[#eddcb8]'
-                    : 'text-slate-400'
-                }`}
-              >
-                Översikt
-              </button>
-
-              <button
-                onClick={() => setActiveSection('animals')}
-                className={`w-full rounded-2xl px-4 py-3 text-left ${
-                  activeSection === 'animals'
-                    ? 'border border-[#c8a96b]/20 bg-[#c8a96b]/10 text-[#eddcb8]'
-                    : 'text-slate-400'
-                }`}
-              >
-                Djur
-              </button>
-
-              <button
-                onClick={() => setActiveSection('inbox')}
-                className={`w-full rounded-2xl px-4 py-3 text-left ${
-                  activeSection === 'inbox'
-                    ? 'border border-[#c8a96b]/20 bg-[#c8a96b]/10 text-[#eddcb8]'
-                    : 'text-slate-400'
-                }`}
-              >
-                Inkorg
-              </button>
-
-              <button
-                onClick={() => setActiveSection('tasks')}
-                className={`w-full rounded-2xl px-4 py-3 text-left ${
-                  activeSection === 'tasks'
-                    ? 'border border-[#c8a96b]/20 bg-[#c8a96b]/10 text-[#eddcb8]'
-                    : 'text-slate-400'
-                }`}
-              >
-                Uppgifter
-              </button>
-
-              <button
-                onClick={() => setActiveSection('documents')}
-                className={`w-full rounded-2xl px-4 py-3 text-left ${
-                  activeSection === 'documents'
-                    ? 'border border-[#c8a96b]/20 bg-[#c8a96b]/10 text-[#eddcb8]'
-                    : 'text-slate-400'
-                }`}
-              >
-                Dokument
-              </button>
-
-              <button
-                onClick={() => setActiveSection('log')}
-                className={`w-full rounded-2xl px-4 py-3 text-left ${
-                  activeSection === 'log'
-                    ? 'border border-[#c8a96b]/20 bg-[#c8a96b]/10 text-[#eddcb8]'
-                    : 'text-slate-400'
-                }`}
-              >
-                Gårdslogg
-              </button>
-            </div>
-
-            <div className="mt-8 rounded-3xl border border-white/10 bg-white/5 p-5">
-              <div className="text-sm uppercase tracking-[0.2em] text-slate-500">
-                Dagens fokus
-              </div>
-              <div className="mt-3 space-y-3 text-sm text-slate-300">
-                <div>• Kontrollera Rosa 14 manuellt</div>
-                <div>• Svara veterinär</div>
-                <div>• Attestera servicefaktura</div>
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-3xl border border-white/10 bg-white/5 p-5">
-              <div className="text-sm uppercase tracking-[0.2em] text-slate-500">
-                Inkorg
-              </div>
-              <div className="mt-3 text-4xl font-semibold text-white">{unreadMails.length}</div>
-              <div className="mt-2 text-sm text-slate-400">olästa mail</div>
-            </div>
-          </div>
-        </aside>
+        <Sidebar
+          activeSection={activeSection}
+          setActiveSection={setActiveSection}
+          unreadCount={unreadMails.length}
+        />
 
         <div className="flex-1">
-          <header className="border-b border-white/10 bg-[#0a1523]/80 backdrop-blur-xl">
-            <div className="mx-auto flex max-w-[1600px] items-center justify-between px-6 py-5">
-              <div>
-                <div className="text-xs uppercase tracking-[0.24em] text-slate-500">
-                  Bondens operativa center
-                </div>
-                <h1 className="mt-1 text-2xl font-semibold text-white">
-                  Översikt över djur, administration och kommunikation
-                </h1>
-              </div>
-
-              <div className="rounded-2xl border border-[#c8a96b]/20 bg-[#c8a96b]/10 px-4 py-2 text-sm text-[#eddcb8]">
-                230 djur totalt · 1 kritisk avvikelse idag
-              </div>
-            </div>
-          </header>
+          <TopHeader
+            activeSection={activeSection}
+            totalAnimals={animals.length}
+            criticalCount={criticalAnimals.length}
+          />
 
           <div className="mx-auto max-w-[1600px] px-6 py-8">
-            <section className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-              <div className="rounded-3xl border border-white/10 bg-[#0c1726] p-6 shadow-xl">
-                <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Aktiva djur</div>
-                <div className="mt-4 text-5xl font-semibold text-white">{animals.length}</div>
-              </div>
-
-              <div className="rounded-3xl border border-white/10 bg-[#0c1726] p-6 shadow-xl">
-                <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Kritiska</div>
-                <div className="mt-4 text-5xl font-semibold text-red-400">{criticalAnimals.length}</div>
-              </div>
-
-              <div className="rounded-3xl border border-white/10 bg-[#0c1726] p-6 shadow-xl">
-                <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Bevakning</div>
-                <div className="mt-4 text-5xl font-semibold text-amber-400">{watchlistAnimals.length}</div>
-              </div>
-
-              <div className="rounded-3xl border border-white/10 bg-[#0c1726] p-6 shadow-xl">
-                <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Olästa mail</div>
-                <div className="mt-4 text-5xl font-semibold text-sky-400">{unreadMails.length}</div>
-              </div>
-
-              <div className="rounded-3xl border border-white/10 bg-[#0c1726] p-6 shadow-xl">
-                <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Snittbatteri</div>
-                <div className="mt-4 text-5xl font-semibold text-white">{avgBattery}%</div>
-              </div>
-            </section>
-
-            <section className="mb-8 grid grid-cols-1 gap-6 2xl:grid-cols-[1.2fr_0.8fr]">
-              <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
-                <div className="text-sm uppercase tracking-[0.24em] text-slate-500">
-                  Prioriterade djur idag
-                </div>
-                <h2 className="mt-2 text-3xl font-semibold text-white">
-                  Det här behöver mest uppmärksamhet
-                </h2>
-
-                <div className="mt-6 space-y-4">
-                  {animals
-                    .filter((animal) => animal.priority !== 'Låg')
-                    .map((animal) => (
-                      <div
-                        key={animal.id}
-                        className="rounded-3xl border border-white/10 bg-[#0a1320] p-5"
-                      >
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                          <div>
-                            <div className="flex items-center gap-3">
-                              <div className="text-xl font-semibold text-white">{animal.name}</div>
-                              <span
-                                className={`rounded-full border px-3 py-1 text-sm ${statusPill(animal.status)}`}
-                              >
-                                {animal.status === 'healthy'
-                                  ? 'Frisk'
-                                  : animal.status === 'watchlist'
-                                  ? 'Bevakning'
-                                  : 'Kritisk'}
-                              </span>
-                            </div>
-
-                            <div className="mt-3 text-sm text-slate-400">
-                              {animal.earTag} · {animal.barn} · {animal.group}
-                            </div>
-
-                            <div className="mt-3 text-slate-200">{animal.deviation}</div>
-                            <div className="mt-2 text-sm text-slate-400">
-                              Senaste observation: {animal.lastObservation}
-                            </div>
-                          </div>
-
-                          <div className="min-w-[180px] rounded-2xl border border-white/10 bg-white/5 p-4">
-                            <div className="text-sm text-slate-400">Batteri</div>
-                            <div className="mt-1 text-3xl font-semibold text-white">
-                              {animal.battery}%
-                            </div>
-                            <div className="mt-2 text-sm text-slate-400">
-                              Ansvarig: {animal.assignedTo}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </div>
-
-              <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
-                <div className="text-sm uppercase tracking-[0.24em] text-slate-500">
-                  Dagens arbetslista
-                </div>
-                <h2 className="mt-2 text-3xl font-semibold text-white">Att göra</h2>
-
-                <div className="mt-6 space-y-3">
-                  {tasks.map((task) => (
-                    <div
-                      key={task.id}
-                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <div className="text-white">{task.title}</div>
-                          <div className="mt-2 text-sm text-slate-400">
-                            {task.owner} · {task.due}
-                            {task.relatedTo ? ` · ${task.relatedTo}` : ''}
-                          </div>
-                        </div>
-
-                        <span
-                          className={`rounded-full border px-3 py-1 text-sm ${taskPill(task.status)}`}
-                        >
-                          {task.status === 'today'
-                            ? 'Idag'
-                            : task.status === 'upcoming'
-                            ? 'Kommande'
-                            : task.status === 'overdue'
-                            ? 'Försenad'
-                            : 'Klar'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </section>
-
-            <section className="mb-8 grid grid-cols-1 gap-6 2xl:grid-cols-[1fr_1fr]">
-              <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
-                <div className="text-sm uppercase tracking-[0.24em] text-slate-500">Inkorg</div>
-                <h2 className="mt-2 text-3xl font-semibold text-white">
-                  Samlade viktiga mail
-                </h2>
-
-                <div className="mt-6 space-y-3">
-                  {inbox.map((mail) => (
-                    <div
-                      key={mail.id}
-                      className="rounded-2xl border border-white/10 bg-[#0a1320] p-4"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <div className="flex items-center gap-3">
-                            <div className="font-medium text-white">{mail.subject}</div>
-                            {mail.unread && (
-                              <span className="rounded-full bg-sky-500/10 px-2 py-1 text-xs text-sky-300">
-                                Oläst
-                              </span>
-                            )}
-                            {mail.important && (
-                              <span className="rounded-full bg-red-500/10 px-2 py-1 text-xs text-red-300">
-                                Viktigt
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="mt-2 text-sm text-slate-400">
-                            {mail.from} · {mail.category}
-                          </div>
-                          <div className="mt-2 text-slate-300">{mail.preview}</div>
-                        </div>
-
-                        <div className="whitespace-nowrap text-sm text-slate-500">
-                          {mail.receivedAt}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
-                <div className="text-sm uppercase tracking-[0.24em] text-slate-500">
-                  Dokument och underlag
-                </div>
-                <h2 className="mt-2 text-3xl font-semibold text-white">Senaste dokument</h2>
-
-                <div className="mt-6 space-y-3">
-                  {documents.map((doc) => (
-                    <div
-                      key={doc.id}
-                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <div className="font-medium text-white">{doc.name}</div>
-                          <div className="mt-2 text-sm text-slate-400">
-                            {doc.type} · {doc.linkedTo} · Källa: {doc.source}
-                          </div>
-                        </div>
-                        <div className="text-sm text-slate-500">{doc.updatedAt}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </section>
-
-            <section className="grid grid-cols-1 gap-6 2xl:grid-cols-[1fr_0.9fr]">
-              <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
-                <div className="text-sm uppercase tracking-[0.24em] text-slate-500">
-                  Gårdslogg
-                </div>
-                <h2 className="mt-2 text-3xl font-semibold text-white">
-                  Senaste händelser och åtgärder
-                </h2>
-
-                <div className="mt-6 space-y-3">
-                  {logs.map((log) => (
-                    <div
-                      key={log.id}
-                      className="rounded-2xl border border-white/10 bg-[#0a1320] p-4"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <div className="flex items-center gap-3">
-                            <div className="font-medium text-white">{log.title}</div>
-                            <span className={`rounded-full border px-2 py-1 text-xs ${logPill(log.severity)}`}>
-                              {log.severity === 'info'
-                                ? 'Info'
-                                : log.severity === 'warning'
-                                ? 'Varning'
-                                : 'Kritisk'}
-                            </span>
-                          </div>
-                          <div className="mt-2 text-slate-300">{log.detail}</div>
-                        </div>
-                        <div className="text-sm text-slate-500">{log.time}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
-                <div className="text-sm uppercase tracking-[0.24em] text-slate-500">
-                  Leverantörer och kontakter
-                </div>
-                <h2 className="mt-2 text-3xl font-semibold text-white">
-                  Nästa administrativa steg
-                </h2>
-
-                <div className="mt-6 space-y-3">
-                  {suppliers.map((supplier) => (
-                    <div
-                      key={supplier.id}
-                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
-                    >
-                      <div className="font-medium text-white">{supplier.name}</div>
-                      <div className="mt-2 text-sm text-slate-400">
-                        {supplier.category} · {supplier.contact}
-                      </div>
-                      <div className="mt-3 text-slate-300">{supplier.nextAction}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </section>
+            {renderSection()}
 
             <div className="mt-8 rounded-[2rem] border border-[#c8a96b]/20 bg-[#c8a96b]/10 p-6 text-[#eddcb8]">
               Nästa steg i produkten: koppla riktig mail, skapa uppgifter från mail automatiskt,
-              koppla dokument till djur och bygg “dagens prioriteringar” från verkliga avvikelser.
+              koppla dokument till djur och bygg dagens prioriteringar från verkliga avvikelser.
             </div>
           </div>
         </div>
