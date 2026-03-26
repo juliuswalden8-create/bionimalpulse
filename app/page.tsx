@@ -11,7 +11,6 @@ type DbAnimal = {
   ear_tag: string | null
   group_name: string | null
   status: string | null
-  priority: number | null
   created_at: string | null
 }
 
@@ -21,8 +20,10 @@ type Animal = {
   earTag: string
   groupName: string
   status: AnimalStatus
-  priority: number
+  createdAt: string | null
 }
+
+type FilterStatus = 'all' | AnimalStatus
 
 function normalizeStatus(value: string | null | undefined): AnimalStatus {
   if (value === 'healthy' || value === 'watchlist' || value === 'critical') {
@@ -57,14 +58,27 @@ function statusClass(status: AnimalStatus) {
   }
 }
 
+function formatDate(value: string | null) {
+  if (!value) return 'Okänt datum'
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Okänt datum'
+
+  return new Intl.DateTimeFormat('sv-SE', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(date)
+}
+
 function Sidebar() {
   return (
-    <aside className="hidden w-[280px] border-r border-white/10 bg-[#08111d] xl:flex xl:flex-col">
+    <aside className="hidden w-[290px] border-r border-white/10 bg-[#08111d] xl:flex xl:flex-col">
       <div className="border-b border-white/10 px-8 py-7">
         <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Bionimal Pulse</div>
         <div className="mt-2 text-2xl font-semibold text-white">Farm Admin</div>
-        <p className="mt-3 text-sm text-slate-400">
-          Enkel driftpanel för registrering och översikt av djur.
+        <p className="mt-3 text-sm leading-6 text-slate-400">
+          Enkel driftpanel för registrering, sökning och översikt av djur.
         </p>
       </div>
 
@@ -80,8 +94,15 @@ function Sidebar() {
 
         <div className="mt-8 rounded-3xl border border-white/10 bg-white/5 p-5">
           <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Status</div>
-          <div className="mt-3 text-sm text-slate-300">
-            Första versionen fokuserar på att skapa och visa djurdata stabilt.
+          <div className="mt-3 text-sm leading-6 text-slate-300">
+            Första versionen fokuserar på stabil registrering, sökning och tydlig överblick.
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-3xl border border-emerald-500/10 bg-emerald-500/5 p-5">
+          <div className="text-sm uppercase tracking-[0.2em] text-emerald-300">Tips</div>
+          <div className="mt-3 text-sm leading-6 text-slate-300">
+            Nästa naturliga steg är redigera, ta bort, anteckningar och uppgifter per djur.
           </div>
         </div>
       </div>
@@ -125,12 +146,26 @@ function TopHeader({ totalAnimals }: { totalAnimals: number }) {
   )
 }
 
+function EmptyState() {
+  return (
+    <div className="rounded-3xl border border-dashed border-white/10 bg-[#0a1320] p-8 text-center">
+      <div className="text-lg font-medium text-white">Inga djur matchar just nu</div>
+      <p className="mt-2 text-sm text-slate-400">
+        Prova att ändra sökning eller filter, eller registrera ett nytt djur.
+      </p>
+    </div>
+  )
+}
+
 export default function Page() {
   const [animals, setAnimals] = useState<Animal[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
+
+  const [query, setQuery] = useState('')
+  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
 
   const [form, setForm] = useState({
     name: '',
@@ -145,7 +180,7 @@ export default function Page() {
 
     const { data, error } = await supabase
       .from('animals')
-      .select('id, name, ear_tag, group_name, status, priority, created_at')
+      .select('id, name, ear_tag, group_name, status, created_at')
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -162,7 +197,7 @@ export default function Page() {
       earTag: animal.ear_tag ?? '',
       groupName: animal.group_name ?? '',
       status: normalizeStatus(animal.status),
-      priority: animal.priority ?? 1,
+      createdAt: animal.created_at ?? null,
     }))
 
     setAnimals(mapped)
@@ -173,30 +208,42 @@ export default function Page() {
     loadAnimals()
   }, [])
 
+  function resetForm() {
+    setForm({
+      name: '',
+      earTag: '',
+      groupName: '',
+      status: 'healthy',
+    })
+  }
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setSaving(true)
     setErrorMessage('')
     setSuccessMessage('')
 
-    if (!form.name.trim()) {
+    const name = form.name.trim()
+    const earTag = form.earTag.trim()
+    const groupName = form.groupName.trim()
+
+    if (!name) {
       setSaving(false)
       setErrorMessage('Du måste ange namn.')
       return
     }
 
-    if (!form.groupName.trim()) {
+    if (!groupName) {
       setSaving(false)
       setErrorMessage('Du måste ange ladugård.')
       return
     }
 
     const payload = {
-      name: form.name.trim(),
-      ear_tag: form.earTag.trim() || null,
-      group_name: form.groupName.trim(),
+      name,
+      ear_tag: earTag || null,
+      group_name: groupName,
       status: form.status,
-      priority: 1,
     }
 
     const { error } = await supabase.from('animals').insert([payload])
@@ -210,13 +257,7 @@ export default function Page() {
     }
 
     setSuccessMessage('Djuret sparades.')
-    setForm({
-      name: '',
-      earTag: '',
-      groupName: '',
-      status: 'healthy',
-    })
-
+    resetForm()
     await loadAnimals()
   }
 
@@ -234,6 +275,22 @@ export default function Page() {
     () => animals.filter((animal) => animal.status === 'critical').length,
     [animals]
   )
+
+  const filteredAnimals = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase()
+
+    return animals.filter((animal) => {
+      const matchesQuery =
+        !normalizedQuery ||
+        animal.name.toLowerCase().includes(normalizedQuery) ||
+        animal.earTag.toLowerCase().includes(normalizedQuery) ||
+        animal.groupName.toLowerCase().includes(normalizedQuery)
+
+      const matchesStatus = filterStatus === 'all' || animal.status === filterStatus
+
+      return matchesQuery && matchesStatus
+    })
+  }, [animals, query, filterStatus])
 
   return (
     <main className="min-h-screen bg-[#08111d] text-white">
@@ -271,6 +328,9 @@ export default function Page() {
               <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
                 <div className="text-sm uppercase tracking-[0.24em] text-slate-500">Registrering</div>
                 <h2 className="mt-2 text-3xl font-semibold text-white">Lägg till djur</h2>
+                <p className="mt-2 text-sm text-slate-400">
+                  Registrera namn, öronmärke, ladugård och status.
+                </p>
 
                 <form onSubmit={handleSubmit} className="mt-6 grid gap-4 md:grid-cols-2">
                   <input
@@ -283,7 +343,7 @@ export default function Page() {
                     }
                     placeholder="Namn"
                     required
-                    className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none"
+                    className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none placeholder:text-slate-500"
                   />
 
                   <input
@@ -295,7 +355,7 @@ export default function Page() {
                       }))
                     }
                     placeholder="Öronmärke"
-                    className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none"
+                    className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none placeholder:text-slate-500"
                   />
 
                   <input
@@ -308,7 +368,7 @@ export default function Page() {
                     }
                     placeholder="Ladugård"
                     required
-                    className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none"
+                    className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none placeholder:text-slate-500"
                   />
 
                   <select
@@ -337,14 +397,7 @@ export default function Page() {
 
                     <button
                       type="button"
-                      onClick={() =>
-                        setForm({
-                          name: '',
-                          earTag: '',
-                          groupName: '',
-                          status: 'healthy',
-                        })
-                      }
+                      onClick={resetForm}
                       className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-slate-300 transition hover:bg-white/10"
                     >
                       Rensa
@@ -354,27 +407,52 @@ export default function Page() {
               </div>
 
               <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
-                <div className="text-sm uppercase tracking-[0.24em] text-slate-500">Register</div>
-                <h2 className="mt-2 text-3xl font-semibold text-white">Sparade djur</h2>
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <div className="text-sm uppercase tracking-[0.24em] text-slate-500">Register</div>
+                    <h2 className="mt-2 text-3xl font-semibold text-white">Sparade djur</h2>
+                    <p className="mt-2 text-sm text-slate-400">
+                      Sök bland djur och filtrera på status.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Sök namn, öronmärke eller ladugård"
+                      className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none placeholder:text-slate-500"
+                    />
+
+                    <select
+                      value={filterStatus}
+                      onChange={(e) => setFilterStatus(e.target.value as FilterStatus)}
+                      className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none"
+                    >
+                      <option value="all">Alla statusar</option>
+                      <option value="healthy">Frisk</option>
+                      <option value="watchlist">Bevakning</option>
+                      <option value="critical">Kritisk</option>
+                    </select>
+                  </div>
+                </div>
 
                 <div className="mt-6 space-y-3">
                   {loading ? (
                     <div className="rounded-2xl border border-white/10 bg-[#0a1320] p-5 text-slate-400">
                       Laddar djur...
                     </div>
-                  ) : animals.length === 0 ? (
-                    <div className="rounded-2xl border border-white/10 bg-[#0a1320] p-5 text-slate-400">
-                      Inga djur registrerade ännu.
-                    </div>
+                  ) : filteredAnimals.length === 0 ? (
+                    <EmptyState />
                   ) : (
-                    animals.map((animal) => (
+                    filteredAnimals.map((animal) => (
                       <div
                         key={animal.id}
                         className="rounded-3xl border border-white/10 bg-[#0a1320] p-5"
                       >
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                           <div>
-                            <div className="flex items-center gap-3">
+                            <div className="flex flex-wrap items-center gap-3">
                               <div className="text-xl font-semibold text-white">{animal.name}</div>
                               <span
                                 className={`rounded-full border px-3 py-1 text-sm ${statusClass(animal.status)}`}
@@ -383,11 +461,10 @@ export default function Page() {
                               </span>
                             </div>
 
-                            <div className="mt-3 text-sm text-slate-400">
-                              Öronmärke: {animal.earTag || '–'}
-                            </div>
-                            <div className="mt-1 text-sm text-slate-400">
-                              Ladugård: {animal.groupName || '–'}
+                            <div className="mt-3 grid gap-1 text-sm text-slate-400">
+                              <div>Öronmärke: {animal.earTag || '–'}</div>
+                              <div>Ladugård: {animal.groupName || '–'}</div>
+                              <div>Skapad: {formatDate(animal.createdAt)}</div>
                             </div>
                           </div>
 
@@ -403,7 +480,7 @@ export default function Page() {
             </section>
 
             <div className="mt-8 rounded-[2rem] border border-[#c8a96b]/20 bg-[#c8a96b]/10 p-6 text-[#eddcb8]">
-              Nästa steg: redigera, ta bort, uppgifter och riktig kundinmatning.
+              Nästa steg: redigera djur, ta bort djur, anteckningar per djur och uppgifter kopplade till varje individ.
             </div>
           </div>
         </div>
