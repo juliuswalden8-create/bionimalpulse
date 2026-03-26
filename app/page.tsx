@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 
 type AnimalStatus = 'healthy' | 'watchlist' | 'critical'
 type MailCategory =
@@ -14,6 +14,7 @@ type TaskStatus = 'today' | 'upcoming' | 'overdue' | 'done'
 type DocumentType = 'Faktura' | 'Avtal' | 'Journal' | 'Försäkring' | 'Service'
 type LogSeverity = 'info' | 'warning' | 'critical'
 type Section = 'overview' | 'animals' | 'inbox' | 'tasks' | 'documents' | 'log'
+type AnimalFilter = 'all' | AnimalStatus
 
 type Animal = {
   id: string
@@ -456,7 +457,70 @@ function Sidebar({
   )
 }
 
-function TopHeader({ activeSection, totalAnimals, criticalCount }: { activeSection: Section; totalAnimals: number; criticalCount: number }) {
+function SearchInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3">
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
+      />
+    </div>
+  )
+}
+
+function FilterPills<T extends string>({
+  value,
+  onChange,
+  options,
+  labels,
+}: {
+  value: T
+  onChange: (value: T) => void
+  options: T[]
+  labels: Record<T, string>
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((option) => {
+        const isActive = option === value
+
+        return (
+          <button
+            key={option}
+            onClick={() => onChange(option)}
+            className={`rounded-full border px-4 py-2 text-sm transition ${
+              isActive
+                ? 'border-[#c8a96b]/20 bg-[#c8a96b]/10 text-[#eddcb8]'
+                : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            {labels[option]}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function TopHeader({
+  activeSection,
+  totalAnimals,
+  criticalCount,
+}: {
+  activeSection: Section
+  totalAnimals: number
+  criticalCount: number
+}) {
   return (
     <header className="border-b border-white/10 bg-[#0a1523]/80 backdrop-blur-xl">
       <div className="mx-auto flex max-w-[1600px] items-center justify-between px-6 py-5">
@@ -473,7 +537,15 @@ function TopHeader({ activeSection, totalAnimals, criticalCount }: { activeSecti
   )
 }
 
-function MetricCard({ title, value, valueClassName = 'text-white' }: { title: string; value: string | number; valueClassName?: string }) {
+function MetricCard({
+  title,
+  value,
+  valueClassName = 'text-white',
+}: {
+  title: string
+  value: string | number
+  valueClassName?: string
+}) {
   return (
     <div className="rounded-3xl border border-white/10 bg-[#0c1726] p-6 shadow-xl">
       <div className="text-sm uppercase tracking-[0.2em] text-slate-500">{title}</div>
@@ -482,7 +554,15 @@ function MetricCard({ title, value, valueClassName = 'text-white' }: { title: st
   )
 }
 
-function SectionCard({ eyebrow, title, children }: { eyebrow: string; title: string; children: React.ReactNode }) {
+function SectionCard({
+  eyebrow,
+  title,
+  children,
+}: {
+  eyebrow: string
+  title: string
+  children: ReactNode
+}) {
   return (
     <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
       <div className="text-sm uppercase tracking-[0.24em] text-slate-500">{eyebrow}</div>
@@ -492,7 +572,15 @@ function SectionCard({ eyebrow, title, children }: { eyebrow: string; title: str
   )
 }
 
-function AnimalsPanel({ animals, onSelectAnimal, selectedAnimalId }: { animals: Animal[]; onSelectAnimal: (animalId: string) => void; selectedAnimalId?: string }) {
+function AnimalsPanel({
+  animals,
+  onSelectAnimal,
+  selectedAnimalId,
+}: {
+  animals: Animal[]
+  onSelectAnimal: (animalId: string) => void
+  selectedAnimalId?: string
+}) {
   return (
     <SectionCard eyebrow="Djur" title="Alla djur och status">
       <div className="space-y-3">
@@ -545,10 +633,12 @@ function InboxPanel({
   inbox,
   animals,
   onToggleRead,
+  onCreateTaskFromMail,
 }: {
   inbox: InboxMail[]
   animals: Animal[]
   onToggleRead: (mailId: string) => void
+  onCreateTaskFromMail: (mailId: string) => void
 }) {
   return (
     <SectionCard eyebrow="Inkorg" title="Samlade viktiga mail">
@@ -581,12 +671,20 @@ function InboxPanel({
 
                 <div className="flex flex-col items-end gap-3">
                   <div className="whitespace-nowrap text-sm text-slate-500">{mail.receivedAt}</div>
-                  <button
-                    onClick={() => onToggleRead(mail.id)}
-                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300 transition hover:bg-white/10 hover:text-white"
-                  >
-                    {mail.unread ? 'Markera läst' : 'Markera oläst'}
-                  </button>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => onToggleRead(mail.id)}
+                      className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300 transition hover:bg-white/10 hover:text-white"
+                    >
+                      {mail.unread ? 'Markera läst' : 'Markera oläst'}
+                    </button>
+                    <button
+                      onClick={() => onCreateTaskFromMail(mail.id)}
+                      className="rounded-xl border border-[#c8a96b]/20 bg-[#c8a96b]/10 px-3 py-2 text-sm text-[#eddcb8] transition hover:bg-[#c8a96b]/20"
+                    >
+                      Skapa uppgift
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -597,7 +695,13 @@ function InboxPanel({
   )
 }
 
-function TasksPanel({ tasks, onToggleTaskDone }: { tasks: FarmTask[]; onToggleTaskDone: (taskId: string) => void }) {
+function TasksPanel({
+  tasks,
+  onToggleTaskDone,
+}: {
+  tasks: FarmTask[]
+  onToggleTaskDone: (taskId: string) => void
+}) {
   return (
     <SectionCard eyebrow="Uppgifter" title="Dagens arbetslista">
       <div className="space-y-3">
@@ -605,7 +709,9 @@ function TasksPanel({ tasks, onToggleTaskDone }: { tasks: FarmTask[]; onToggleTa
           <div key={task.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className={`text-white ${task.status === 'done' ? 'opacity-60 line-through' : ''}`}>{task.title}</div>
+                <div className={`text-white ${task.status === 'done' ? 'line-through opacity-60' : ''}`}>
+                  {task.title}
+                </div>
                 <div className="mt-2 text-sm text-slate-400">
                   {task.owner} · {task.due}
                   {task.relatedTo ? ` · ${task.relatedTo}` : ''}
@@ -696,16 +802,25 @@ function SuppliersPanel({ suppliers }: { suppliers: Supplier[] }) {
   )
 }
 
-function AnimalDetailPanel({ animal, relatedMails, relatedTasks, relatedDocuments }: {
+function AnimalDetailPanel({
+  animal,
+  relatedMails,
+  relatedTasks,
+  relatedDocuments,
+  onCreateTaskFromAnimal,
+}: {
   animal?: Animal
   relatedMails: InboxMail[]
   relatedTasks: FarmTask[]
   relatedDocuments: FarmDocument[]
+  onCreateTaskFromAnimal: (animalId: string) => void
 }) {
   if (!animal) {
     return (
       <SectionCard eyebrow="Djurdetalj" title="Välj ett djur">
-        <div className="text-slate-400">Välj ett djur i listan för att se relaterade mail, uppgifter och dokument.</div>
+        <div className="text-slate-400">
+          Välj ett djur i listan för att se relaterade mail, uppgifter och dokument.
+        </div>
       </SectionCard>
     )
   }
@@ -725,12 +840,23 @@ function AnimalDetailPanel({ animal, relatedMails, relatedTasks, relatedDocument
               {animal.barn}
             </span>
           </div>
+
           <div className="mt-4 grid gap-3 text-sm text-slate-300 md:grid-cols-2">
             <div>Grupp: {animal.group}</div>
             <div>Ansvarig: {animal.assignedTo}</div>
             <div>Batteri: {animal.battery}%</div>
             <div>Prioritet: {animal.priority}</div>
           </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => onCreateTaskFromAnimal(animal.id)}
+              className="rounded-xl border border-[#c8a96b]/20 bg-[#c8a96b]/10 px-4 py-2 text-sm text-[#eddcb8] transition hover:bg-[#c8a96b]/20"
+            >
+              Skapa uppgift från avvikelse
+            </button>
+          </div>
+
           <div className="mt-4 text-slate-200">{animal.deviation}</div>
           <div className="mt-2 text-sm text-slate-400">Senaste observation: {animal.lastObservation}</div>
         </div>
@@ -792,13 +918,17 @@ function AnimalDetailPanel({ animal, relatedMails, relatedTasks, relatedDocument
 export default function Page() {
   const animals = animalsSeed
   const documents = documentsSeed
-  const logs = logsSeed
   const suppliers = suppliersSeed
 
   const [activeSection, setActiveSection] = useState<Section>('overview')
   const [selectedAnimalId, setSelectedAnimalId] = useState<string>('a1')
   const [inbox, setInbox] = useState<InboxMail[]>(inboxSeed)
   const [tasks, setTasks] = useState<FarmTask[]>(tasksSeed)
+  const [logs, setLogs] = useState<FarmLog[]>(logsSeed)
+  const [animalSearch, setAnimalSearch] = useState('')
+  const [animalFilter, setAnimalFilter] = useState<AnimalFilter>('all')
+  const [inboxSearch, setInboxSearch] = useState('')
+  const [taskSearch, setTaskSearch] = useState('')
 
   const criticalAnimals = useMemo(
     () => animals.filter((animal) => animal.status === 'critical'),
@@ -812,13 +942,41 @@ export default function Page() {
 
   const unreadMails = useMemo(() => inbox.filter((mail) => mail.unread), [inbox])
   const importantMails = useMemo(() => inbox.filter((mail) => mail.important), [inbox])
-  const todayTasks = useMemo(() => tasks.filter((task) => task.status === 'today'), [tasks])
-  const overdueTasks = useMemo(() => tasks.filter((task) => task.status === 'overdue'), [tasks])
 
   const avgBattery = useMemo(() => {
     const total = animals.reduce((sum, animal) => sum + animal.battery, 0)
     return Math.round(total / animals.length)
   }, [animals])
+
+  const filteredAnimals = useMemo(() => {
+    return animals.filter((animal) => {
+      const matchesSearch = [animal.name, animal.earTag, animal.barn, animal.group, animal.assignedTo]
+        .join(' ')
+        .toLowerCase()
+        .includes(animalSearch.toLowerCase())
+
+      const matchesFilter = animalFilter === 'all' ? true : animal.status === animalFilter
+      return matchesSearch && matchesFilter
+    })
+  }, [animals, animalFilter, animalSearch])
+
+  const filteredInbox = useMemo(() => {
+    return inbox.filter((mail) => {
+      return [mail.subject, mail.from, mail.preview, mail.category]
+        .join(' ')
+        .toLowerCase()
+        .includes(inboxSearch.toLowerCase())
+    })
+  }, [inbox, inboxSearch])
+
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((task) => {
+      return [task.title, task.owner, task.due, task.relatedTo ?? '']
+        .join(' ')
+        .toLowerCase()
+        .includes(taskSearch.toLowerCase())
+    })
+  }, [taskSearch, tasks])
 
   const selectedAnimal = useMemo(
     () => animals.find((animal) => animal.id === selectedAnimalId),
@@ -832,7 +990,7 @@ export default function Page() {
 
   const relatedTasks = useMemo(
     () => tasks.filter((task) => task.relatedTo === selectedAnimal?.name),
-    [tasks, selectedAnimal]
+    [selectedAnimal, tasks]
   )
 
   const relatedDocuments = useMemo(
@@ -840,48 +998,181 @@ export default function Page() {
     [documents, selectedAnimal]
   )
 
+  function addLog(entry: Omit<FarmLog, 'id'>) {
+    setLogs((current) => [
+      {
+        id: `l${Date.now()}`,
+        ...entry,
+      },
+      ...current,
+    ])
+  }
+
   function handleToggleRead(mailId: string) {
-    setInbox((current) =>
-      current.map((mail) =>
-        mail.id === mailId ? { ...mail, unread: !mail.unread } : mail
+    setInbox((current) => {
+      const target = current.find((mail) => mail.id === mailId)
+      if (!target) return current
+
+      const nextUnread = !target.unread
+      const updated = current.map((mail) =>
+        mail.id === mailId ? { ...mail, unread: nextUnread } : mail
       )
-    )
+
+      addLog({
+        time: 'Nu',
+        title: nextUnread ? 'Mail markerat som oläst' : 'Mail markerat som läst',
+        detail: target.subject,
+        severity: 'info',
+      })
+
+      return updated
+    })
   }
 
   function handleToggleTaskDone(taskId: string) {
-    setTasks((current) =>
-      current.map((task) => {
-        if (task.id !== taskId) return task
-        return { ...task, status: task.status === 'done' ? 'today' : 'done' }
+    setTasks((current) => {
+      const target = current.find((task) => task.id === taskId)
+      if (!target) return current
+
+      const nextStatus: TaskStatus = target.status === 'done' ? 'today' : 'done'
+      const updated = current.map((task) =>
+        task.id === taskId ? { ...task, status: nextStatus } : task
+      )
+
+      addLog({
+        time: 'Nu',
+        title: nextStatus === 'done' ? 'Uppgift klarmarkerad' : 'Uppgift återöppnad',
+        detail: target.title,
+        severity: nextStatus === 'done' ? 'info' : 'warning',
       })
-    )
+
+      return updated
+    })
+  }
+
+  function handleCreateTaskFromAnimal(animalId: string) {
+    const animal = animals.find((entry) => entry.id === animalId)
+    if (!animal) return
+
+    const newTask: FarmTask = {
+      id: `t${Date.now()}`,
+      title: `Följ upp avvikelse för ${animal.name}`,
+      owner: animal.assignedTo,
+      due: 'Idag',
+      status: 'today',
+      relatedTo: animal.name,
+    }
+
+    setTasks((current) => [newTask, ...current])
+    addLog({
+      time: 'Nu',
+      title: 'Ny uppgift skapad från djuravvikelse',
+      detail: `${animal.name} lades till i arbetslistan.`,
+      severity: animal.status === 'critical' ? 'critical' : 'warning',
+    })
+    setActiveSection('tasks')
+  }
+
+  function handleCreateTaskFromMail(mailId: string) {
+    const mail = inbox.find((entry) => entry.id === mailId)
+    if (!mail) return
+
+    const linkedAnimal = animals.find((animal) => animal.id === mail.linkedAnimalId)
+    const newTask: FarmTask = {
+      id: `t${Date.now()}`,
+      title: `Följ upp mail: ${mail.subject}`,
+      owner: linkedAnimal?.assignedTo ?? 'Karin',
+      due: 'Idag',
+      status: 'today',
+      relatedTo: linkedAnimal?.name,
+    }
+
+    setTasks((current) => [newTask, ...current])
+    addLog({
+      time: 'Nu',
+      title: 'Ny uppgift skapad från mail',
+      detail: mail.subject,
+      severity: mail.important ? 'warning' : 'info',
+    })
+    setActiveSection('tasks')
   }
 
   function renderSection() {
     if (activeSection === 'animals') {
       return (
-        <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[1.2fr_0.8fr]">
-          <AnimalsPanel
-            animals={animals}
-            onSelectAnimal={setSelectedAnimalId}
-            selectedAnimalId={selectedAnimalId}
-          />
-          <AnimalDetailPanel
-            animal={selectedAnimal}
-            relatedMails={relatedMails}
-            relatedTasks={relatedTasks}
-            relatedDocuments={relatedDocuments}
-          />
-        </div>
+        <>
+          <section className="mb-6 grid gap-4 xl:grid-cols-[1fr_auto] xl:items-center">
+            <SearchInput
+              value={animalSearch}
+              onChange={setAnimalSearch}
+              placeholder="Sök djur, öronmärke, ladugård eller ansvarig"
+            />
+            <FilterPills
+              value={animalFilter}
+              onChange={setAnimalFilter}
+              options={['all', 'healthy', 'watchlist', 'critical']}
+              labels={{
+                all: 'Alla',
+                healthy: 'Friska',
+                watchlist: 'Bevakning',
+                critical: 'Kritiska',
+              }}
+            />
+          </section>
+
+          <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[1.2fr_0.8fr]">
+            <AnimalsPanel
+              animals={filteredAnimals}
+              onSelectAnimal={setSelectedAnimalId}
+              selectedAnimalId={selectedAnimalId}
+            />
+            <AnimalDetailPanel
+              animal={selectedAnimal}
+              relatedMails={relatedMails}
+              relatedTasks={relatedTasks}
+              relatedDocuments={relatedDocuments}
+              onCreateTaskFromAnimal={handleCreateTaskFromAnimal}
+            />
+          </div>
+        </>
       )
     }
 
     if (activeSection === 'inbox') {
-      return <InboxPanel inbox={inbox} animals={animals} onToggleRead={handleToggleRead} />
+      return (
+        <>
+          <section className="mb-6">
+            <SearchInput
+              value={inboxSearch}
+              onChange={setInboxSearch}
+              placeholder="Sök avsändare, ämne, kategori eller innehåll i mail"
+            />
+          </section>
+
+          <InboxPanel
+            inbox={filteredInbox}
+            animals={animals}
+            onToggleRead={handleToggleRead}
+            onCreateTaskFromMail={handleCreateTaskFromMail}
+          />
+        </>
+      )
     }
 
     if (activeSection === 'tasks') {
-      return <TasksPanel tasks={tasks} onToggleTaskDone={handleToggleTaskDone} />
+      return (
+        <>
+          <section className="mb-6">
+            <SearchInput
+              value={taskSearch}
+              onChange={setTaskSearch}
+              placeholder="Sök uppgift, ansvarig eller kopplat djur"
+            />
+          </section>
+
+          <TasksPanel tasks={filteredTasks} onToggleTaskDone={handleToggleTaskDone} />
+        </>
+      )
     }
 
     if (activeSection === 'documents') {
@@ -955,7 +1246,12 @@ export default function Page() {
         </section>
 
         <section className="mb-8 grid grid-cols-1 gap-6 2xl:grid-cols-[1fr_1fr]">
-          <InboxPanel inbox={inbox.slice(0, 4)} animals={animals} onToggleRead={handleToggleRead} />
+          <InboxPanel
+            inbox={inbox.slice(0, 4)}
+            animals={animals}
+            onToggleRead={handleToggleRead}
+            onCreateTaskFromMail={handleCreateTaskFromMail}
+          />
           <DocumentsPanel documents={documents} />
         </section>
 
@@ -996,3 +1292,4 @@ export default function Page() {
     </main>
   )
 }
+
