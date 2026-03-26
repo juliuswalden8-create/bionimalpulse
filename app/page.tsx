@@ -1,583 +1,501 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import type { Session } from '@supabase/supabase-js'
-import { supabase } from '@/lib/supabase'
+import { useMemo, useState } from 'react'
 
-type AnimalStatus = 'ok' | 'warning' | 'alert'
+type AnimalStatus = 'healthy' | 'watchlist' | 'critical'
+type MailCategory =
+  | 'Veterinär'
+  | 'Leverantör'
+  | 'Faktura'
+  | 'Myndighet'
+  | 'Personal'
+  | 'Transport'
+type TaskStatus = 'today' | 'upcoming' | 'overdue' | 'done'
+type DocumentType = 'Faktura' | 'Avtal' | 'Journal' | 'Försäkring' | 'Service'
+type LogSeverity = 'info' | 'warning' | 'critical'
 
 type Animal = {
   id: string
-  user_id: string
   name: string
-  status: AnimalStatus
+  earTag: string
+  barn: string
+  group: string
   battery: number
+  status: AnimalStatus
+  deviation: string
+  lastObservation: string
+  priority: 'Hög' | 'Medel' | 'Låg'
+  assignedTo: string
 }
 
-type ActivityItem = {
+type InboxMail = {
   id: string
-  text: string
-  time: string
+  from: string
+  subject: string
+  preview: string
+  category: MailCategory
+  receivedAt: string
+  unread: boolean
+  important: boolean
 }
 
-export default function Home() {
-  const [session, setSession] = useState<Session | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [authMessage, setAuthMessage] = useState('')
-
-  const [animals, setAnimals] = useState<Animal[]>([])
-  const [search, setSearch] = useState('')
-
-  const [name, setName] = useState('')
-  const [battery, setBattery] = useState('100')
-
-  const [errorMessage, setErrorMessage] = useState('')
-  const [successMessage, setSuccessMessage] = useState('')
-
-  const [saving, setSaving] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editName, setEditName] = useState('')
-  const [editBattery, setEditBattery] = useState('100')
-  const [editSaving, setEditSaving] = useState(false)
-
-  const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([])
-
-  function pushActivity(text: string) {
-    const now = new Date().toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-
-    setActivityFeed((prev) => [
-      {
-        id: `${Date.now()}-${Math.random()}`,
-        text,
-        time: now,
-      },
-      ...prev,
-    ].slice(0, 8))
-  }
-
-  function showSuccess(message: string) {
-    setSuccessMessage(message)
-    setTimeout(() => setSuccessMessage(''), 2500)
-  }
-
-  function clearMessages() {
-    setErrorMessage('')
-    setSuccessMessage('')
-    setAuthMessage('')
-  }
-
-  function getStatusFromBattery(batteryValue: number): AnimalStatus {
-    if (batteryValue <= 10) return 'alert'
-    if (batteryValue <= 30) return 'warning'
-    return 'ok'
-  }
-
-  function getStatusLabel(status: AnimalStatus) {
-    if (status === 'ok') return 'Healthy'
-    if (status === 'warning') return 'Watchlist'
-    return 'Critical'
-  }
-
-  function getStatusBadgeClass(status: AnimalStatus) {
-    if (status === 'ok') {
-      return 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-    }
-    if (status === 'warning') {
-      return 'border border-amber-500/20 bg-amber-500/10 text-amber-300'
-    }
-    return 'border border-red-500/20 bg-red-500/10 text-red-300'
-  }
-
-  function getBatteryBarClass(batteryValue: number) {
-    if (batteryValue <= 10) return 'bg-red-500'
-    if (batteryValue <= 30) return 'bg-amber-500'
-    return 'bg-emerald-500'
-  }
-
-  function validateBattery(value: number) {
-    if (Number.isNaN(value)) return 'Battery must be a number.'
-    if (value < 0 || value > 100) return 'Battery must be between 0 and 100.'
-    return null
-  }
-
-  async function fetchAnimals(showLoader = false) {
-    if (!session?.user?.id) return
-
-    if (showLoader) setRefreshing(true)
-    setErrorMessage('')
-
-    const { data, error } = await supabase
-      .from('animals')
-      .select('*')
-      .eq('user_id', session.user.id)
-      .order('name', { ascending: true })
-
-    if (showLoader) setRefreshing(false)
-
-    if (error) {
-      console.error(error)
-      setErrorMessage(error.message)
-      return
-    }
-
-    const safeAnimals: Animal[] = (data || []).map((item: any) => ({
-      id: String(item.id),
-      user_id: String(item.user_id ?? ''),
-      name: String(item.name ?? ''),
-      status: getStatusFromBattery(Number(item.battery ?? 0)),
-      battery: Number(item.battery ?? 0),
-    }))
-
-    setAnimals(safeAnimals)
-  }
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session)
-      setLoading(false)
-    })
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession)
-      setLoading(false)
-    })
-
-    return () => {
-      subscription.unsubscribe()
-    }
-  }, [])
-
-  useEffect(() => {
-    if (session?.user?.id) {
-      fetchAnimals(true)
-      pushActivity('Session initialized and portfolio synced.')
-    } else {
-      setAnimals([])
-    }
-  }, [session])
-
-  useEffect(() => {
-    if (!session?.user?.id) return
-
-    const channel = supabase
-      .channel(`animals-changes-${session.user.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'animals',
-          filter: `user_id=eq.${session.user.id}`,
-        },
-        () => {
-          fetchAnimals()
-        }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [session])
-
-  async function signUp() {
-    clearMessages()
-
-    if (!email.trim() || !password.trim()) {
-      setAuthMessage('Email and password are required.')
-      return
-    }
-
-    const { error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-    })
-
-    if (error) {
-      setAuthMessage(error.message)
-      return
-    }
-
-    setAuthMessage('Account created. Check your email if confirmation is required.')
-  }
-
-  async function signIn() {
-    clearMessages()
-
-    if (!email.trim() || !password.trim()) {
-      setAuthMessage('Email and password are required.')
-      return
-    }
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    })
-
-    if (error) {
-      setAuthMessage(error.message)
-      return
-    }
-
-    setAuthMessage('')
-  }
-
-  async function logOut() {
-    clearMessages()
-
-    const { error } = await supabase.auth.signOut()
-
-    if (error) {
-      setAuthMessage(error.message)
-      return
-    }
-
-    setSession(null)
-    setAnimals([])
-  }
-
-  async function addAnimal() {
-    if (!session?.user?.id) {
-      setErrorMessage('No logged in user found.')
-      return
-    }
-
-    clearMessages()
-
-    if (!name.trim()) {
-      setErrorMessage('Name is required.')
-      return
-    }
-
-    const batteryNumber = Number(battery)
-    const batteryError = validateBattery(batteryNumber)
-
-    if (batteryError) {
-      setErrorMessage(batteryError)
-      return
-    }
-
-    setSaving(true)
-
-    const { error } = await supabase.from('animals').insert([
-      {
-        user_id: session.user.id,
-        name: name.trim(),
-        status: getStatusFromBattery(batteryNumber),
-        battery: batteryNumber,
-      },
-    ])
-
-    setSaving(false)
-
-    if (error) {
-      console.error(error)
-      setErrorMessage(error.message)
-      return
-    }
-
-    pushActivity(`New asset registered: ${name.trim()}.`)
-    setName('')
-    setBattery('100')
-    showSuccess('Animal added successfully.')
-  }
-
-  async function deleteAnimal(id: string) {
-    if (!session?.user?.id) return
-    if (!confirm('Are you sure you want to delete this animal?')) return
-
-    clearMessages()
-    setDeletingId(id)
-
-    const animalToDelete = animals.find((animal) => animal.id === id)
-
-    const { error } = await supabase
-      .from('animals')
-      .delete()
-      .eq('id', id)
-      .eq('user_id', session.user.id)
-
-    setDeletingId(null)
-
-    if (error) {
-      console.error(error)
-      setErrorMessage(error.message)
-      return
-    }
-
-    if (editingId === id) {
-      cancelEdit()
-    }
-
-    pushActivity(`Asset removed: ${animalToDelete?.name ?? 'Unknown animal'}.`)
-    showSuccess('Animal deleted successfully.')
-  }
-
-  function startEdit(animal: Animal) {
-    clearMessages()
-    setEditingId(animal.id)
-    setEditName(animal.name)
-    setEditBattery(String(animal.battery))
-  }
-
-  function cancelEdit() {
-    setEditingId(null)
-    setEditName('')
-    setEditBattery('100')
-    setEditSaving(false)
-  }
-
-  async function saveEdit() {
-    if (!session?.user?.id || !editingId) return
-
-    clearMessages()
-
-    if (!editName.trim()) {
-      setErrorMessage('Name is required.')
-      return
-    }
-
-    const batteryNumber = Number(editBattery)
-    const batteryError = validateBattery(batteryNumber)
-
-    if (batteryError) {
-      setErrorMessage(batteryError)
-      return
-    }
-
-    setEditSaving(true)
-
-    const { error } = await supabase
-      .from('animals')
-      .update({
-        name: editName.trim(),
-        status: getStatusFromBattery(batteryNumber),
-        battery: batteryNumber,
-      })
-      .eq('id', editingId)
-      .eq('user_id', session.user.id)
-
-    setEditSaving(false)
-
-    if (error) {
-      console.error(error)
-      setErrorMessage(error.message)
-      return
-    }
-
-    pushActivity(`Asset updated: ${editName.trim()}.`)
-    cancelEdit()
-    showSuccess('Animal updated successfully.')
-  }
-
-  const filteredAnimals = useMemo(() => {
-    return animals.filter((animal) =>
-      animal.name.toLowerCase().includes(search.toLowerCase())
-    )
-  }, [animals, search])
-
-  const okCount = useMemo(
-    () => animals.filter((animal) => animal.status === 'ok').length,
+type FarmTask = {
+  id: string
+  title: string
+  owner: string
+  due: string
+  status: TaskStatus
+  relatedTo?: string
+}
+
+type FarmDocument = {
+  id: string
+  name: string
+  type: DocumentType
+  linkedTo: string
+  updatedAt: string
+  source: string
+}
+
+type FarmLog = {
+  id: string
+  time: string
+  title: string
+  detail: string
+  severity: LogSeverity
+}
+
+type Supplier = {
+  id: string
+  name: string
+  category: string
+  contact: string
+  nextAction: string
+}
+
+const animalsSeed: Animal[] = [
+  {
+    id: 'a1',
+    name: 'Rosa 14',
+    earTag: 'SE-10234',
+    barn: 'Ladugård A',
+    group: 'Mjölkande',
+    battery: 8,
+    status: 'critical',
+    deviation: 'Avvikande låg aktivitet senaste 10 timmarna',
+    lastObservation: 'Står avskilt mer än normalt',
+    priority: 'Hög',
+    assignedTo: 'Anna',
+  },
+  {
+    id: 'a2',
+    name: 'Maja 08',
+    earTag: 'SE-10218',
+    barn: 'Ladugård A',
+    group: 'Mjölkande',
+    battery: 24,
+    status: 'watchlist',
+    deviation: 'Rörelsemönster under normalnivå',
+    lastObservation: 'Lite långsammare till foderplats',
+    priority: 'Hög',
+    assignedTo: 'Johan',
+  },
+  {
+    id: 'a3',
+    name: 'Bella 22',
+    earTag: 'SE-10278',
+    barn: 'Ladugård B',
+    group: 'Kvigor',
+    battery: 92,
+    status: 'healthy',
+    deviation: 'Ingen avvikelse',
+    lastObservation: 'Normal',
+    priority: 'Låg',
+    assignedTo: 'Anna',
+  },
+  {
+    id: 'a4',
+    name: 'Stjärna 03',
+    earTag: 'SE-10191',
+    barn: 'Ladugård A',
+    group: 'Mjölkande',
+    battery: 67,
+    status: 'healthy',
+    deviation: 'Ingen avvikelse',
+    lastObservation: 'Normal',
+    priority: 'Låg',
+    assignedTo: 'Karin',
+  },
+  {
+    id: 'a5',
+    name: 'Freja 31',
+    earTag: 'SE-10301',
+    barn: 'Ladugård C',
+    group: 'Sinkor',
+    battery: 17,
+    status: 'watchlist',
+    deviation: 'Batteri lågt och mindre aktivitet än normalt',
+    lastObservation: 'Behöver kollas visuellt idag',
+    priority: 'Medel',
+    assignedTo: 'Johan',
+  },
+  {
+    id: 'a6',
+    name: 'Luna 11',
+    earTag: 'SE-10211',
+    barn: 'Ladugård B',
+    group: 'Kvigor',
+    battery: 88,
+    status: 'healthy',
+    deviation: 'Ingen avvikelse',
+    lastObservation: 'Normal',
+    priority: 'Låg',
+    assignedTo: 'Karin',
+  },
+]
+
+const inboxSeed: InboxMail[] = [
+  {
+    id: 'm1',
+    from: 'Distriktsveterinärerna',
+    subject: 'Återkoppling på provsvar för Rosa 14',
+    preview: 'Vi rekommenderar uppföljning inom 24 timmar om beteendet kvarstår.',
+    category: 'Veterinär',
+    receivedAt: '08:12',
+    unread: true,
+    important: true,
+  },
+  {
+    id: 'm2',
+    from: 'Lantmännen',
+    subject: 'Bekräftelse på foderleverans torsdag',
+    preview: 'Leveransen beräknas anlända mellan 07:00 och 09:00.',
+    category: 'Leverantör',
+    receivedAt: '07:45',
+    unread: true,
+    important: false,
+  },
+  {
+    id: 'm3',
+    from: 'Agria Försäkring',
+    subject: 'Komplettering behövs i skadeärende',
+    preview: 'Vi behöver ett uppdaterat underlag och en kort beskrivning av händelsen.',
+    category: 'Myndighet',
+    receivedAt: 'Igår',
+    unread: false,
+    important: true,
+  },
+  {
+    id: 'm4',
+    from: 'Svea Ekonomi',
+    subject: 'Ny leverantörsfaktura att attestera',
+    preview: 'Faktura 20481 för service av ventilationssystem.',
+    category: 'Faktura',
+    receivedAt: 'Igår',
+    unread: true,
+    important: true,
+  },
+  {
+    id: 'm5',
+    from: 'Transport Syd',
+    subject: 'Ändrad upphämtningstid fredag',
+    preview: 'Lastbilen kommer cirka 45 minuter senare än planerat.',
+    category: 'Transport',
+    receivedAt: 'Igår',
+    unread: false,
+    important: false,
+  },
+]
+
+const tasksSeed: FarmTask[] = [
+  {
+    id: 't1',
+    title: 'Kontrollera Rosa 14 manuellt i box',
+    owner: 'Anna',
+    due: 'Idag 10:30',
+    status: 'today',
+    relatedTo: 'Rosa 14',
+  },
+  {
+    id: 't2',
+    title: 'Svara veterinär om provsvar',
+    owner: 'Johan',
+    due: 'Idag 11:00',
+    status: 'today',
+  },
+  {
+    id: 't3',
+    title: 'Attestera faktura för ventilationsservice',
+    owner: 'Karin',
+    due: 'Idag 14:00',
+    status: 'today',
+  },
+  {
+    id: 't4',
+    title: 'Beställ nytt halsband till Freja 31',
+    owner: 'Johan',
+    due: 'Imorgon',
+    status: 'upcoming',
+    relatedTo: 'Freja 31',
+  },
+  {
+    id: 't5',
+    title: 'Följ upp foderleveransplan för torsdag',
+    owner: 'Anna',
+    due: 'Imorgon',
+    status: 'upcoming',
+  },
+  {
+    id: 't6',
+    title: 'Skicka komplettering till försäkringsärende',
+    owner: 'Karin',
+    due: 'Försenad',
+    status: 'overdue',
+  },
+]
+
+const documentsSeed: FarmDocument[] = [
+  {
+    id: 'd1',
+    name: 'Provsvar_Rosa14_Mars.pdf',
+    type: 'Journal',
+    linkedTo: 'Rosa 14',
+    updatedAt: '08:20',
+    source: 'Veterinärmail',
+  },
+  {
+    id: 'd2',
+    name: 'Faktura_Ventilation_20481.pdf',
+    type: 'Faktura',
+    linkedTo: 'Teknikbygg AB',
+    updatedAt: 'Igår',
+    source: 'Inkorg',
+  },
+  {
+    id: 'd3',
+    name: 'Försäkringsärende_Stallskada.pdf',
+    type: 'Försäkring',
+    linkedTo: 'Ladugård A',
+    updatedAt: 'Igår',
+    source: 'Agria',
+  },
+  {
+    id: 'd4',
+    name: 'Serviceprotokoll_Mjölkanläggning.pdf',
+    type: 'Service',
+    linkedTo: 'Mjölksystem',
+    updatedAt: '2 dagar sedan',
+    source: 'Tekniker',
+  },
+]
+
+const logsSeed: FarmLog[] = [
+  {
+    id: 'l1',
+    time: '09:14',
+    title: 'Avvikelse upptäckt på Rosa 14',
+    detail: 'Aktivitetsnivå under normalintervall och långvarigt stillastående.',
+    severity: 'critical',
+  },
+  {
+    id: 'l2',
+    time: '08:48',
+    title: 'Mail från veterinär mottaget',
+    detail: 'Provsvar inkom och prioriterades automatiskt.',
+    severity: 'warning',
+  },
+  {
+    id: 'l3',
+    time: '08:05',
+    title: 'Ny faktura kategoriserad',
+    detail: 'Ventilationsservice markerad för attest idag.',
+    severity: 'info',
+  },
+  {
+    id: 'l4',
+    time: '07:52',
+    title: 'Freja 31 lagd på bevakning',
+    detail: 'Lågt batteri kombinerat med lägre aktivitet än 7-dagarsgenomsnitt.',
+    severity: 'warning',
+  },
+]
+
+const suppliersSeed: Supplier[] = [
+  {
+    id: 's1',
+    name: 'Distriktsveterinärerna',
+    category: 'Veterinär',
+    contact: 'kontakt@vet.se',
+    nextAction: 'Återkoppla om Rosa 14 före 11:00',
+  },
+  {
+    id: 's2',
+    name: 'Lantmännen',
+    category: 'Foder',
+    contact: 'kundservice@lantmannen.se',
+    nextAction: 'Bekräfta torsdagens lossningstid',
+  },
+  {
+    id: 's3',
+    name: 'Teknikbygg AB',
+    category: 'Service',
+    contact: 'service@teknikbygg.se',
+    nextAction: 'Attestera faktura och boka uppföljning',
+  },
+]
+
+function statusPill(status: AnimalStatus) {
+  if (status === 'healthy') return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+  if (status === 'watchlist') return 'border-amber-500/20 bg-amber-500/10 text-amber-300'
+  return 'border-red-500/20 bg-red-500/10 text-red-300'
+}
+
+function taskPill(status: TaskStatus) {
+  if (status === 'today') return 'border-sky-500/20 bg-sky-500/10 text-sky-300'
+  if (status === 'upcoming') return 'border-violet-500/20 bg-violet-500/10 text-violet-300'
+  if (status === 'overdue') return 'border-red-500/20 bg-red-500/10 text-red-300'
+  return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+}
+
+function logPill(severity: LogSeverity) {
+  if (severity === 'info') return 'bg-slate-500/10 text-slate-300 border-slate-400/20'
+  if (severity === 'warning') return 'bg-amber-500/10 text-amber-300 border-amber-500/20'
+  return 'bg-red-500/10 text-red-300 border-red-500/20'
+}
+
+export default function Page() {
+  const [activeSection, setActiveSection] = useState<
+    'overview' | 'animals' | 'inbox' | 'tasks' | 'documents' | 'log'
+  >('overview')
+
+  const [animals] = useState<Animal[]>(animalsSeed)
+  const [inbox] = useState<InboxMail[]>(inboxSeed)
+  const [tasks] = useState<FarmTask[]>(tasksSeed)
+  const [documents] = useState<FarmDocument[]>(documentsSeed)
+  const [logs] = useState<FarmLog[]>(logsSeed)
+  const [suppliers] = useState<Supplier[]>(suppliersSeed)
+
+  const criticalAnimals = useMemo(
+    () => animals.filter((animal) => animal.status === 'critical'),
     [animals]
   )
 
-  const warningCount = useMemo(
-    () => animals.filter((animal) => animal.status === 'warning').length,
+  const watchlistAnimals = useMemo(
+    () => animals.filter((animal) => animal.status === 'watchlist'),
     [animals]
   )
 
-  const alertCount = useMemo(
-    () => animals.filter((animal) => animal.status === 'alert').length,
-    [animals]
-  )
+  const unreadMails = useMemo(() => inbox.filter((mail) => mail.unread), [inbox])
+  const importantMails = useMemo(() => inbox.filter((mail) => mail.important), [inbox])
+  const todayTasks = useMemo(() => tasks.filter((task) => task.status === 'today'), [tasks])
+  const overdueTasks = useMemo(() => tasks.filter((task) => task.status === 'overdue'), [tasks])
 
   const avgBattery = useMemo(() => {
-    if (animals.length === 0) return 0
     const total = animals.reduce((sum, animal) => sum + animal.battery, 0)
     return Math.round(total / animals.length)
   }, [animals])
 
-  const criticalAnimals = useMemo(
-    () => animals.filter((animal) => animal.status === 'alert'),
-    [animals]
-  )
-
-  const warningAnimals = useMemo(
-    () => animals.filter((animal) => animal.status === 'warning'),
-    [animals]
-  )
-
-  const portfolioHealthScore = useMemo(() => {
-    if (animals.length === 0) return 0
-    return Math.max(
-      0,
-      Math.min(
-        100,
-        Math.round((okCount / animals.length) * 100 + avgBattery * 0.2)
-      )
-    )
-  }, [animals, okCount, avgBattery])
-
-  if (loading) {
-    return (
-      <main className="min-h-screen bg-[#07111f] text-white">
-        <div className="flex min-h-screen items-center justify-center px-6">
-          <div className="rounded-3xl border border-white/10 bg-white/5 px-8 py-6 text-lg shadow-2xl backdrop-blur-xl">
-            Loading command center...
-          </div>
-        </div>
-      </main>
-    )
-  }
-
-  if (!session) {
-    return (
-      <main className="min-h-screen bg-[linear-gradient(135deg,#07111f_0%,#0b1728_45%,#0f2137_100%)] text-white">
-        <div className="mx-auto grid min-h-screen max-w-7xl grid-cols-1 items-center gap-10 px-6 py-10 lg:grid-cols-2">
-          <div className="max-w-2xl">
-            <div className="mb-4 inline-flex rounded-full border border-[#c8a96b]/20 bg-[#c8a96b]/10 px-4 py-2 text-sm font-medium text-[#e7d4ac]">
-              Binomial Pulse · Executive Monitoring Suite
-            </div>
-
-            <h1 className="text-5xl font-semibold tracking-tight text-white md:text-6xl">
-              Enterprise livestock intelligence.
-            </h1>
-
-            <p className="mt-6 max-w-xl text-lg leading-8 text-slate-300">
-              A premium monitoring environment for battery health, asset visibility,
-              escalation control and operational oversight in one institutional-grade interface.
-            </p>
-
-            <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-                <div className="text-sm text-slate-400">Live monitoring</div>
-                <div className="mt-2 text-2xl font-semibold text-white">Realtime</div>
-              </div>
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-                <div className="text-sm text-slate-400">Risk control</div>
-                <div className="mt-2 text-2xl font-semibold text-white">Tiered alerts</div>
-              </div>
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-                <div className="text-sm text-slate-400">Decision layer</div>
-                <div className="mt-2 text-2xl font-semibold text-white">Command view</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mx-auto w-full max-w-md rounded-[2rem] border border-white/10 bg-white/10 p-8 shadow-2xl backdrop-blur-2xl">
-            <div className="mb-8">
-              <div className="text-sm uppercase tracking-[0.24em] text-slate-400">
-                Secure access
-              </div>
-              <h2 className="mt-2 text-3xl font-semibold text-white">Sign in</h2>
-              <p className="mt-2 text-slate-300">
-                Access the operational command center.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <input
-                className="w-full rounded-2xl border border-white/10 bg-[#081221] px-4 py-3 text-white outline-none placeholder:text-slate-500"
-                type="email"
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-
-              <input
-                className="w-full rounded-2xl border border-white/10 bg-[#081221] px-4 py-3 text-white outline-none placeholder:text-slate-500"
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                <button
-                  onClick={signIn}
-                  className="rounded-2xl bg-[#c8a96b] px-5 py-3 font-medium text-[#0d1622] transition hover:opacity-90"
-                >
-                  Log in
-                </button>
-
-                <button
-                  onClick={signUp}
-                  className="rounded-2xl border border-white/15 bg-white/5 px-5 py-3 font-medium text-white transition hover:bg-white/10"
-                >
-                  Sign up
-                </button>
-              </div>
-
-              {authMessage && (
-                <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100">
-                  {authMessage}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </main>
-    )
-  }
-
   return (
     <main className="min-h-screen bg-[#08111d] text-white">
       <div className="flex min-h-screen">
-        <aside className="hidden w-[280px] border-r border-white/10 bg-[#06101b] xl:flex xl:flex-col">
+        <aside className="hidden w-[290px] border-r border-white/10 bg-[#06101b] xl:flex xl:flex-col">
           <div className="border-b border-white/10 px-8 py-7">
             <div className="text-xs uppercase tracking-[0.28em] text-slate-500">
-              Binomial Pulse
+              Bionimal Pulse
             </div>
-            <div className="mt-2 text-2xl font-semibold text-white">Command Center</div>
+            <div className="mt-2 text-2xl font-semibold text-white">Farm OS</div>
+            <p className="mt-3 text-sm text-slate-400">
+              Samlat arbetsverktyg för djur, administration och kommunikation.
+            </p>
           </div>
 
           <div className="flex-1 px-5 py-6">
             <div className="space-y-2">
-              <div className="rounded-2xl border border-[#c8a96b]/20 bg-[#c8a96b]/10 px-4 py-3 text-[#eddcb8]">
-                Overview
-              </div>
-              <div className="rounded-2xl px-4 py-3 text-slate-400">Asset Registry</div>
-              <div className="rounded-2xl px-4 py-3 text-slate-400">Risk Monitoring</div>
-              <div className="rounded-2xl px-4 py-3 text-slate-400">Operations Feed</div>
-              <div className="rounded-2xl px-4 py-3 text-slate-400">Analytics</div>
+              <button
+                onClick={() => setActiveSection('overview')}
+                className={`w-full rounded-2xl px-4 py-3 text-left ${
+                  activeSection === 'overview'
+                    ? 'border border-[#c8a96b]/20 bg-[#c8a96b]/10 text-[#eddcb8]'
+                    : 'text-slate-400'
+                }`}
+              >
+                Översikt
+              </button>
+
+              <button
+                onClick={() => setActiveSection('animals')}
+                className={`w-full rounded-2xl px-4 py-3 text-left ${
+                  activeSection === 'animals'
+                    ? 'border border-[#c8a96b]/20 bg-[#c8a96b]/10 text-[#eddcb8]'
+                    : 'text-slate-400'
+                }`}
+              >
+                Djur
+              </button>
+
+              <button
+                onClick={() => setActiveSection('inbox')}
+                className={`w-full rounded-2xl px-4 py-3 text-left ${
+                  activeSection === 'inbox'
+                    ? 'border border-[#c8a96b]/20 bg-[#c8a96b]/10 text-[#eddcb8]'
+                    : 'text-slate-400'
+                }`}
+              >
+                Inkorg
+              </button>
+
+              <button
+                onClick={() => setActiveSection('tasks')}
+                className={`w-full rounded-2xl px-4 py-3 text-left ${
+                  activeSection === 'tasks'
+                    ? 'border border-[#c8a96b]/20 bg-[#c8a96b]/10 text-[#eddcb8]'
+                    : 'text-slate-400'
+                }`}
+              >
+                Uppgifter
+              </button>
+
+              <button
+                onClick={() => setActiveSection('documents')}
+                className={`w-full rounded-2xl px-4 py-3 text-left ${
+                  activeSection === 'documents'
+                    ? 'border border-[#c8a96b]/20 bg-[#c8a96b]/10 text-[#eddcb8]'
+                    : 'text-slate-400'
+                }`}
+              >
+                Dokument
+              </button>
+
+              <button
+                onClick={() => setActiveSection('log')}
+                className={`w-full rounded-2xl px-4 py-3 text-left ${
+                  activeSection === 'log'
+                    ? 'border border-[#c8a96b]/20 bg-[#c8a96b]/10 text-[#eddcb8]'
+                    : 'text-slate-400'
+                }`}
+              >
+                Gårdslogg
+              </button>
             </div>
 
             <div className="mt-8 rounded-3xl border border-white/10 bg-white/5 p-5">
               <div className="text-sm uppercase tracking-[0.2em] text-slate-500">
-                Session
+                Dagens fokus
               </div>
-              <div className="mt-3 text-sm text-slate-300 break-all">{session.user.email}</div>
+              <div className="mt-3 space-y-3 text-sm text-slate-300">
+                <div>• Kontrollera Rosa 14 manuellt</div>
+                <div>• Svara veterinär</div>
+                <div>• Attestera servicefaktura</div>
+              </div>
             </div>
 
             <div className="mt-5 rounded-3xl border border-white/10 bg-white/5 p-5">
               <div className="text-sm uppercase tracking-[0.2em] text-slate-500">
-                Portfolio score
+                Inkorg
               </div>
-              <div className="mt-3 text-4xl font-semibold text-white">
-                {portfolioHealthScore}
-              </div>
-              <div className="mt-2 text-sm text-slate-400">Composite operating health</div>
+              <div className="mt-3 text-4xl font-semibold text-white">{unreadMails.length}</div>
+              <div className="mt-2 text-sm text-slate-400">olästa mail</div>
             </div>
-          </div>
-
-          <div className="border-t border-white/10 px-5 py-5">
-            <button
-              onClick={logOut}
-              className="w-full rounded-2xl bg-white px-4 py-3 font-medium text-slate-900 transition hover:bg-slate-200"
-            >
-              Log out
-            </button>
           </div>
         </aside>
 
@@ -586,349 +504,279 @@ export default function Home() {
             <div className="mx-auto flex max-w-[1600px] items-center justify-between px-6 py-5">
               <div>
                 <div className="text-xs uppercase tracking-[0.24em] text-slate-500">
-                  Executive dashboard
+                  Bondens operativa center
                 </div>
                 <h1 className="mt-1 text-2xl font-semibold text-white">
-                  Operations Command View
+                  Översikt över djur, administration och kommunikation
                 </h1>
               </div>
 
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => fetchAnimals(true)}
-                  className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white transition hover:bg-white/10"
-                >
-                  {refreshing ? 'Refreshing...' : 'Refresh'}
-                </button>
-
-                <button
-                  onClick={logOut}
-                  className="rounded-2xl bg-[#c8a96b] px-4 py-2.5 text-sm font-medium text-[#0d1622] transition hover:opacity-90 xl:hidden"
-                >
-                  Log out
-                </button>
+              <div className="rounded-2xl border border-[#c8a96b]/20 bg-[#c8a96b]/10 px-4 py-2 text-sm text-[#eddcb8]">
+                230 djur totalt · 1 kritisk avvikelse idag
               </div>
             </div>
           </header>
 
           <div className="mx-auto max-w-[1600px] px-6 py-8">
-            <div className="mb-8 grid grid-cols-1 gap-6 2xl:grid-cols-[1.45fr_0.85fr]">
-              <section className="rounded-[2rem] border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] p-8 shadow-2xl">
-                <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-                  <div className="max-w-3xl">
-                    <div className="text-sm uppercase tracking-[0.24em] text-slate-400">
-                      Portfolio overview
-                    </div>
-                    <h2 className="mt-3 text-4xl font-semibold tracking-tight text-white">
-                      Live livestock operations snapshot
-                    </h2>
-                    <p className="mt-4 text-slate-300">
-                      Monitor battery health, isolate operational risk and manage field assets through a control-room interface designed for executive oversight.
-                    </p>
-                  </div>
-
-                  <div className="rounded-3xl border border-[#c8a96b]/20 bg-[#c8a96b]/10 px-6 py-5">
-                    <div className="text-sm text-[#ddcba6]">Average battery health</div>
-                    <div className="mt-2 text-4xl font-semibold text-white">{avgBattery}%</div>
-                  </div>
-                </div>
-
-                {(errorMessage || successMessage) && (
-                  <div className="mt-6 space-y-3">
-                    {errorMessage && (
-                      <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                        {errorMessage}
-                      </div>
-                    )}
-                    {successMessage && (
-                      <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-                        {successMessage}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </section>
-
-              <section className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
-                <div className="text-sm uppercase tracking-[0.24em] text-slate-500">
-                  Risk summary
-                </div>
-
-                <div className="mt-5 space-y-4">
-                  <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-                    <div>
-                      <div className="text-sm text-slate-400">Critical exposure</div>
-                      <div className="mt-1 text-3xl font-semibold text-white">{alertCount}</div>
-                    </div>
-                    <div className="rounded-full border border-red-500/20 bg-red-500/10 px-3 py-1 text-sm text-red-300">
-                      Alert
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-                    <div>
-                      <div className="text-sm text-slate-400">Watchlist assets</div>
-                      <div className="mt-1 text-3xl font-semibold text-white">{warningCount}</div>
-                    </div>
-                    <div className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-sm text-amber-300">
-                      Warning
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-                    <div>
-                      <div className="text-sm text-slate-400">Healthy assets</div>
-                      <div className="mt-1 text-3xl font-semibold text-white">{okCount}</div>
-                    </div>
-                    <div className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-sm text-emerald-300">
-                      Healthy
-                    </div>
-                  </div>
-                </div>
-              </section>
-            </div>
-
-            <section className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <section className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
               <div className="rounded-3xl border border-white/10 bg-[#0c1726] p-6 shadow-xl">
-                <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Total assets</div>
+                <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Aktiva djur</div>
                 <div className="mt-4 text-5xl font-semibold text-white">{animals.length}</div>
               </div>
 
               <div className="rounded-3xl border border-white/10 bg-[#0c1726] p-6 shadow-xl">
-                <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Healthy</div>
-                <div className="mt-4 text-5xl font-semibold text-emerald-400">{okCount}</div>
+                <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Kritiska</div>
+                <div className="mt-4 text-5xl font-semibold text-red-400">{criticalAnimals.length}</div>
               </div>
 
               <div className="rounded-3xl border border-white/10 bg-[#0c1726] p-6 shadow-xl">
-                <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Warnings</div>
-                <div className="mt-4 text-5xl font-semibold text-amber-400">{warningCount}</div>
+                <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Bevakning</div>
+                <div className="mt-4 text-5xl font-semibold text-amber-400">{watchlistAnimals.length}</div>
               </div>
 
               <div className="rounded-3xl border border-white/10 bg-[#0c1726] p-6 shadow-xl">
-                <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Critical</div>
-                <div className="mt-4 text-5xl font-semibold text-red-400">{alertCount}</div>
+                <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Olästa mail</div>
+                <div className="mt-4 text-5xl font-semibold text-sky-400">{unreadMails.length}</div>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-[#0c1726] p-6 shadow-xl">
+                <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Snittbatteri</div>
+                <div className="mt-4 text-5xl font-semibold text-white">{avgBattery}%</div>
               </div>
             </section>
 
-            <div className="mb-8 grid grid-cols-1 gap-6 2xl:grid-cols-[1.15fr_0.85fr]">
-              <section className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
-                <div className="mb-6">
-                  <div className="text-sm uppercase tracking-[0.24em] text-slate-500">
-                    Asset onboarding
-                  </div>
-                  <h3 className="mt-2 text-2xl font-semibold text-white">
-                    Register new animal
-                  </h3>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_180px_auto]">
-                  <input
-                    className="rounded-2xl border border-white/10 bg-[#081221] px-4 py-3 text-white outline-none placeholder:text-slate-500"
-                    type="text"
-                    placeholder="Animal name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-
-                  <input
-                    className="rounded-2xl border border-white/10 bg-[#081221] px-4 py-3 text-white outline-none placeholder:text-slate-500"
-                    type="number"
-                    placeholder="Battery %"
-                    value={battery}
-                    onChange={(e) => setBattery(e.target.value)}
-                  />
-
-                  <button
-                    onClick={addAnimal}
-                    disabled={saving}
-                    className="rounded-2xl bg-[#c8a96b] px-5 py-3 font-medium text-[#0d1622] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {saving ? 'Adding...' : 'Add animal'}
-                  </button>
-                </div>
-              </section>
-
-              <section className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
+            <section className="mb-8 grid grid-cols-1 gap-6 2xl:grid-cols-[1.2fr_0.8fr]">
+              <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
                 <div className="text-sm uppercase tracking-[0.24em] text-slate-500">
-                  Operations feed
+                  Prioriterade djur idag
                 </div>
-                <h3 className="mt-2 text-2xl font-semibold text-white">Recent activity</h3>
+                <h2 className="mt-2 text-3xl font-semibold text-white">
+                  Det här behöver mest uppmärksamhet
+                </h2>
 
-                <div className="mt-5 space-y-3">
-                  {activityFeed.length === 0 ? (
-                    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-slate-400">
-                      No recent operational activity.
-                    </div>
-                  ) : (
-                    activityFeed.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-start justify-between gap-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-4"
-                      >
-                        <div className="text-sm text-slate-200">{item.text}</div>
-                        <div className="whitespace-nowrap text-xs text-slate-500">
-                          {item.time}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </section>
-            </div>
-
-            {(criticalAnimals.length > 0 || warningAnimals.length > 0) && (
-              <section className="mb-8 grid grid-cols-1 gap-4 xl:grid-cols-2">
-                {criticalAnimals.length > 0 && (
-                  <div className="rounded-3xl border border-red-500/20 bg-red-500/10 p-6">
-                    <div className="text-sm uppercase tracking-[0.2em] text-red-300">
-                      Critical escalation
-                    </div>
-                    <div className="mt-3 text-white">
-                      {criticalAnimals.map((animal) => animal.name).join(', ')}
-                    </div>
-                  </div>
-                )}
-
-                {warningAnimals.length > 0 && (
-                  <div className="rounded-3xl border border-amber-500/20 bg-amber-500/10 p-6">
-                    <div className="text-sm uppercase tracking-[0.2em] text-amber-300">
-                      Watchlist
-                    </div>
-                    <div className="mt-3 text-white">
-                      {warningAnimals.map((animal) => `${animal.name} (${animal.battery}%)`).join(', ')}
-                    </div>
-                  </div>
-                )}
-              </section>
-            )}
-
-            <section className="rounded-[2rem] border border-white/10 bg-[#0c1726] shadow-2xl">
-              <div className="border-b border-white/10 px-8 py-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                  <div>
-                    <div className="text-sm uppercase tracking-[0.24em] text-slate-500">
-                      Monitoring registry
-                    </div>
-                    <h3 className="mt-2 text-2xl font-semibold text-white">Animal portfolio</h3>
-                  </div>
-
-                  <div className="w-full lg:max-w-sm">
-                    <input
-                      className="w-full rounded-2xl border border-white/10 bg-[#081221] px-4 py-3 text-white outline-none placeholder:text-slate-500"
-                      type="text"
-                      placeholder="Search animal"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="px-4 py-4 md:px-8 md:py-6">
-                {filteredAnimals.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-white/10 bg-white/5 p-10 text-center text-slate-400">
-                    No animals found.
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {filteredAnimals.map((animal) => (
+                <div className="mt-6 space-y-4">
+                  {animals
+                    .filter((animal) => animal.priority !== 'Låg')
+                    .map((animal) => (
                       <div
                         key={animal.id}
-                        className="rounded-3xl border border-white/10 bg-[#0a1320] p-5 transition hover:border-white/20"
+                        className="rounded-3xl border border-white/10 bg-[#0a1320] p-5"
                       >
-                        <div className="grid grid-cols-1 gap-6 2xl:grid-cols-[1.4fr_180px_240px_auto] 2xl:items-center">
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                           <div>
-                            <div className="text-xl font-semibold text-white">{animal.name}</div>
-                            <div className="mt-3">
+                            <div className="flex items-center gap-3">
+                              <div className="text-xl font-semibold text-white">{animal.name}</div>
                               <span
-                                className={`inline-flex rounded-full px-3 py-1 text-sm font-medium ${getStatusBadgeClass(animal.status)}`}
+                                className={`rounded-full border px-3 py-1 text-sm ${statusPill(animal.status)}`}
                               >
-                                {getStatusLabel(animal.status)}
+                                {animal.status === 'healthy'
+                                  ? 'Frisk'
+                                  : animal.status === 'watchlist'
+                                  ? 'Bevakning'
+                                  : 'Kritisk'}
                               </span>
                             </div>
+
+                            <div className="mt-3 text-sm text-slate-400">
+                              {animal.earTag} · {animal.barn} · {animal.group}
+                            </div>
+
+                            <div className="mt-3 text-slate-200">{animal.deviation}</div>
+                            <div className="mt-2 text-sm text-slate-400">
+                              Senaste observation: {animal.lastObservation}
+                            </div>
                           </div>
 
-                          <div>
-                            <div className="text-sm text-slate-500">Battery</div>
-                            <div className="mt-2 text-3xl font-semibold text-white">
+                          <div className="min-w-[180px] rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="text-sm text-slate-400">Batteri</div>
+                            <div className="mt-1 text-3xl font-semibold text-white">
                               {animal.battery}%
                             </div>
-                          </div>
-
-                          <div>
-                            <div className="text-sm text-slate-500">Power level</div>
-                            <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-white/10">
-                              <div
-                                className={`h-full rounded-full ${getBatteryBarClass(animal.battery)}`}
-                                style={{ width: `${Math.max(0, Math.min(100, animal.battery))}%` }}
-                              />
+                            <div className="mt-2 text-sm text-slate-400">
+                              Ansvarig: {animal.assignedTo}
                             </div>
                           </div>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
 
-                          <div className="flex flex-wrap gap-3 2xl:justify-end">
-                            <button
-                              onClick={() => startEdit(animal)}
-                              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 font-medium text-white transition hover:bg-white/10"
-                            >
-                              Edit
-                            </button>
+              <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
+                <div className="text-sm uppercase tracking-[0.24em] text-slate-500">
+                  Dagens arbetslista
+                </div>
+                <h2 className="mt-2 text-3xl font-semibold text-white">Att göra</h2>
 
-                            <button
-                              onClick={() => deleteAnimal(animal.id)}
-                              disabled={deletingId === animal.id}
-                              className="rounded-2xl bg-red-600 px-4 py-2 font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {deletingId === animal.id ? 'Deleting...' : 'Delete'}
-                            </button>
+                <div className="mt-6 space-y-3">
+                  {tasks.map((task) => (
+                    <div
+                      key={task.id}
+                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="text-white">{task.title}</div>
+                          <div className="mt-2 text-sm text-slate-400">
+                            {task.owner} · {task.due}
+                            {task.relatedTo ? ` · ${task.relatedTo}` : ''}
                           </div>
                         </div>
 
-                        {editingId === animal.id && (
-                          <div className="mt-5 rounded-3xl border border-white/10 bg-white/5 p-5">
-                            <div className="mb-4 text-sm uppercase tracking-[0.2em] text-slate-500">
-                              Edit asset
-                            </div>
-
-                            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_180px_auto_auto]">
-                              <input
-                                className="rounded-2xl border border-white/10 bg-[#081221] px-4 py-3 text-white outline-none placeholder:text-slate-500"
-                                type="text"
-                                value={editName}
-                                onChange={(e) => setEditName(e.target.value)}
-                                placeholder="Animal name"
-                              />
-
-                              <input
-                                className="rounded-2xl border border-white/10 bg-[#081221] px-4 py-3 text-white outline-none placeholder:text-slate-500"
-                                type="number"
-                                value={editBattery}
-                                onChange={(e) => setEditBattery(e.target.value)}
-                                placeholder="Battery %"
-                              />
-
-                              <button
-                                onClick={saveEdit}
-                                disabled={editSaving}
-                                className="rounded-2xl bg-[#c8a96b] px-4 py-3 font-medium text-[#0d1622] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {editSaving ? 'Saving...' : 'Save'}
-                              </button>
-
-                              <button
-                                onClick={cancelEdit}
-                                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white transition hover:bg-white/10"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        )}
+                        <span
+                          className={`rounded-full border px-3 py-1 text-sm ${taskPill(task.status)}`}
+                        >
+                          {task.status === 'today'
+                            ? 'Idag'
+                            : task.status === 'upcoming'
+                            ? 'Kommande'
+                            : task.status === 'overdue'
+                            ? 'Försenad'
+                            : 'Klar'}
+                        </span>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    </div>
+                  ))}
+                </div>
               </div>
             </section>
+
+            <section className="mb-8 grid grid-cols-1 gap-6 2xl:grid-cols-[1fr_1fr]">
+              <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
+                <div className="text-sm uppercase tracking-[0.24em] text-slate-500">Inkorg</div>
+                <h2 className="mt-2 text-3xl font-semibold text-white">
+                  Samlade viktiga mail
+                </h2>
+
+                <div className="mt-6 space-y-3">
+                  {inbox.map((mail) => (
+                    <div
+                      key={mail.id}
+                      className="rounded-2xl border border-white/10 bg-[#0a1320] p-4"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="flex items-center gap-3">
+                            <div className="font-medium text-white">{mail.subject}</div>
+                            {mail.unread && (
+                              <span className="rounded-full bg-sky-500/10 px-2 py-1 text-xs text-sky-300">
+                                Oläst
+                              </span>
+                            )}
+                            {mail.important && (
+                              <span className="rounded-full bg-red-500/10 px-2 py-1 text-xs text-red-300">
+                                Viktigt
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="mt-2 text-sm text-slate-400">
+                            {mail.from} · {mail.category}
+                          </div>
+                          <div className="mt-2 text-slate-300">{mail.preview}</div>
+                        </div>
+
+                        <div className="whitespace-nowrap text-sm text-slate-500">
+                          {mail.receivedAt}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
+                <div className="text-sm uppercase tracking-[0.24em] text-slate-500">
+                  Dokument och underlag
+                </div>
+                <h2 className="mt-2 text-3xl font-semibold text-white">Senaste dokument</h2>
+
+                <div className="mt-6 space-y-3">
+                  {documents.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="font-medium text-white">{doc.name}</div>
+                          <div className="mt-2 text-sm text-slate-400">
+                            {doc.type} · {doc.linkedTo} · Källa: {doc.source}
+                          </div>
+                        </div>
+                        <div className="text-sm text-slate-500">{doc.updatedAt}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className="grid grid-cols-1 gap-6 2xl:grid-cols-[1fr_0.9fr]">
+              <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
+                <div className="text-sm uppercase tracking-[0.24em] text-slate-500">
+                  Gårdslogg
+                </div>
+                <h2 className="mt-2 text-3xl font-semibold text-white">
+                  Senaste händelser och åtgärder
+                </h2>
+
+                <div className="mt-6 space-y-3">
+                  {logs.map((log) => (
+                    <div
+                      key={log.id}
+                      className="rounded-2xl border border-white/10 bg-[#0a1320] p-4"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="flex items-center gap-3">
+                            <div className="font-medium text-white">{log.title}</div>
+                            <span className={`rounded-full border px-2 py-1 text-xs ${logPill(log.severity)}`}>
+                              {log.severity === 'info'
+                                ? 'Info'
+                                : log.severity === 'warning'
+                                ? 'Varning'
+                                : 'Kritisk'}
+                            </span>
+                          </div>
+                          <div className="mt-2 text-slate-300">{log.detail}</div>
+                        </div>
+                        <div className="text-sm text-slate-500">{log.time}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
+                <div className="text-sm uppercase tracking-[0.24em] text-slate-500">
+                  Leverantörer och kontakter
+                </div>
+                <h2 className="mt-2 text-3xl font-semibold text-white">
+                  Nästa administrativa steg
+                </h2>
+
+                <div className="mt-6 space-y-3">
+                  {suppliers.map((supplier) => (
+                    <div
+                      key={supplier.id}
+                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                    >
+                      <div className="font-medium text-white">{supplier.name}</div>
+                      <div className="mt-2 text-sm text-slate-400">
+                        {supplier.category} · {supplier.contact}
+                      </div>
+                      <div className="mt-3 text-slate-300">{supplier.nextAction}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <div className="mt-8 rounded-[2rem] border border-[#c8a96b]/20 bg-[#c8a96b]/10 p-6 text-[#eddcb8]">
+              Nästa steg i produkten: koppla riktig mail, skapa uppgifter från mail automatiskt,
+              koppla dokument till djur och bygg “dagens prioriteringar” från verkliga avvikelser.
+            </div>
           </div>
         </div>
       </div>
