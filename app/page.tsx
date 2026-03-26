@@ -25,7 +25,7 @@ export default function Home() {
   const [search, setSearch] = useState('')
   const [name, setName] = useState('')
   const [battery, setBattery] = useState('100')
-
+  const [successMessage, setSuccessMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -43,6 +43,7 @@ export default function Home() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession)
+      setLoading(false)
     })
 
     return () => {
@@ -149,6 +150,7 @@ export default function Home() {
     }
 
     setErrorMessage('')
+    setSuccessMessage('')
 
     if (!name.trim()) {
       setErrorMessage('Name is required.')
@@ -159,6 +161,11 @@ export default function Home() {
 
     if (Number.isNaN(batteryNumber)) {
       setErrorMessage('Battery must be a number.')
+      return
+    }
+
+    if (batteryNumber < 0 || batteryNumber > 100) {
+      setErrorMessage('Battery must be between 0 and 100.')
       return
     }
 
@@ -181,14 +188,17 @@ export default function Home() {
 
     setName('')
     setBattery('100')
+    setSuccessMessage('Animal added successfully!')
+    setTimeout(() => setSuccessMessage(''), 2000)
     fetchAnimals()
   }
 
   async function deleteAnimal(id: string) {
-    if (!confirm('Är du säker att du vill ta bort detta animal?')) return
+    if (!confirm('Är du säker på att du vill ta bort detta djur?')) return
     if (!session?.user?.id) return
 
     setErrorMessage('')
+    setSuccessMessage('')
 
     const { error } = await supabase
       .from('animals')
@@ -206,6 +216,8 @@ export default function Home() {
       cancelEdit()
     }
 
+    setSuccessMessage('Animal deleted successfully!')
+    setTimeout(() => setSuccessMessage(''), 2000)
     fetchAnimals()
   }
 
@@ -213,6 +225,8 @@ export default function Home() {
     setEditingId(animal.id)
     setEditName(animal.name)
     setEditBattery(animal.battery)
+    setErrorMessage('')
+    setSuccessMessage('')
   }
 
   function cancelEdit() {
@@ -226,6 +240,7 @@ export default function Home() {
     if (!editingId) return
 
     setErrorMessage('')
+    setSuccessMessage('')
 
     if (!editName.trim()) {
       setErrorMessage('Name is required.')
@@ -236,6 +251,11 @@ export default function Home() {
 
     if (Number.isNaN(batteryNumber)) {
       setErrorMessage('Battery must be a number.')
+      return
+    }
+
+    if (batteryNumber < 0 || batteryNumber > 100) {
+      setErrorMessage('Battery must be between 0 and 100.')
       return
     }
 
@@ -258,6 +278,8 @@ export default function Home() {
     }
 
     cancelEdit()
+    setSuccessMessage('Animal updated successfully!')
+    setTimeout(() => setSuccessMessage(''), 2000)
     fetchAnimals()
   }
 
@@ -448,6 +470,12 @@ export default function Home() {
           {errorMessage && (
             <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
               Error: {errorMessage}
+            </div>
+          )}
+
+          {successMessage && (
+            <div className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4 text-green-700">
+              {successMessage}
             </div>
           )}
         </div>
