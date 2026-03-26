@@ -22,8 +22,8 @@ export default function Home() {
   const [authMessage, setAuthMessage] = useState('')
 
   const [animals, setAnimals] = useState<Animal[]>([])
+  const [search, setSearch] = useState('')
   const [name, setName] = useState('')
-  const [status, setStatus] = useState<AnimalStatus>('ok')
   const [battery, setBattery] = useState('100')
 
   const [errorMessage, setErrorMessage] = useState('')
@@ -31,7 +31,6 @@ export default function Home() {
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
-  const [editStatus, setEditStatus] = useState<AnimalStatus>('ok')
   const [editBattery, setEditBattery] = useState(0)
 
   useEffect(() => {
@@ -58,6 +57,18 @@ export default function Home() {
       setAnimals([])
     }
   }, [session])
+
+  function getStatusFromBattery(batteryValue: number): AnimalStatus {
+    if (batteryValue <= 10) return 'alert'
+    if (batteryValue <= 20) return 'warning'
+    return 'ok'
+  }
+
+  function getStatusBadgeClass(status: AnimalStatus) {
+    if (status === 'ok') return 'bg-green-100 text-green-700'
+    if (status === 'warning') return 'bg-yellow-100 text-yellow-700'
+    return 'bg-red-100 text-red-700'
+  }
 
   async function fetchAnimals() {
     if (!session?.user?.id) return
@@ -151,11 +162,13 @@ export default function Home() {
       return
     }
 
+    const autoStatus = getStatusFromBattery(batteryNumber)
+
     const { error } = await supabase.from('animals').insert([
       {
         user_id: session.user.id,
         name: name.trim(),
-        status,
+        status: autoStatus,
         battery: batteryNumber,
       },
     ])
@@ -167,12 +180,12 @@ export default function Home() {
     }
 
     setName('')
-    setStatus('ok')
     setBattery('100')
     fetchAnimals()
   }
 
   async function deleteAnimal(id: string) {
+    if (!confirm('Är du säker att du vill ta bort detta animal?')) return
     if (!session?.user?.id) return
 
     setErrorMessage('')
@@ -199,14 +212,12 @@ export default function Home() {
   function startEdit(animal: Animal) {
     setEditingId(animal.id)
     setEditName(animal.name)
-    setEditStatus(animal.status)
     setEditBattery(animal.battery)
   }
 
   function cancelEdit() {
     setEditingId(null)
     setEditName('')
-    setEditStatus('ok')
     setEditBattery(0)
   }
 
@@ -221,12 +232,21 @@ export default function Home() {
       return
     }
 
+    const batteryNumber = Number(editBattery)
+
+    if (Number.isNaN(batteryNumber)) {
+      setErrorMessage('Battery must be a number.')
+      return
+    }
+
+    const autoStatus = getStatusFromBattery(batteryNumber)
+
     const { error } = await supabase
       .from('animals')
       .update({
         name: editName.trim(),
-        status: editStatus,
-        battery: Number(editBattery),
+        status: autoStatus,
+        battery: batteryNumber,
       })
       .eq('id', editingId)
       .eq('user_id', session.user.id)
@@ -240,6 +260,10 @@ export default function Home() {
     cancelEdit()
     fetchAnimals()
   }
+
+  const filteredAnimals = animals.filter((animal) =>
+    animal.name.toLowerCase().includes(search.toLowerCase())
+  )
 
   const criticalAlerts = useMemo(
     () => animals.filter((animal) => animal.status === 'alert'),
@@ -396,7 +420,7 @@ export default function Home() {
         <div className="mb-8 rounded-3xl bg-white p-6 shadow-sm">
           <h2 className="mb-4 text-2xl font-semibold text-gray-800">Add animal</h2>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.5fr_1fr_140px_auto]">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.5fr_140px_auto]">
             <input
               className="rounded-xl border border-gray-300 px-4 py-3 outline-none"
               type="text"
@@ -404,16 +428,6 @@ export default function Home() {
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
-
-            <select
-              className="rounded-xl border border-gray-300 px-4 py-3 outline-none"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as AnimalStatus)}
-            >
-              <option value="ok">ok</option>
-              <option value="warning">warning</option>
-              <option value="alert">alert</option>
-            </select>
 
             <input
               className="rounded-xl border border-gray-300 px-4 py-3 outline-none"
@@ -441,22 +455,36 @@ export default function Home() {
         <div className="rounded-3xl bg-white p-6 shadow-sm">
           <h2 className="mb-4 text-2xl font-semibold text-gray-800">Animal list</h2>
 
+          <input
+            className="mb-4 w-full rounded-xl border border-gray-300 px-4 py-3 outline-none"
+            type="text"
+            placeholder="Sök animal"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+
           <div className="space-y-4">
-            {animals.length === 0 && (
+            {filteredAnimals.length === 0 && (
               <div className="rounded-2xl border border-dashed border-gray-300 p-6 text-gray-500">
                 No animals yet.
               </div>
             )}
 
-            {animals.map((animal) => (
+            {filteredAnimals.map((animal) => (
               <div key={animal.id} className="rounded-2xl border border-gray-200 p-5">
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div>
                     <div className="text-xl font-semibold text-gray-800">{animal.name}</div>
-                    <div className="mt-1 text-gray-600">
-                      Status: <span className="font-medium">{animal.status}</span>
+
+                    <div className="mt-2">
+                      <span
+                        className={`inline-block rounded-full px-3 py-1 text-sm font-medium ${getStatusBadgeClass(animal.status)}`}
+                      >
+                        {animal.status}
+                      </span>
                     </div>
-                    <div className="text-gray-600">
+
+                    <div className="mt-2 text-gray-600">
                       Battery: <span className="font-medium">{animal.battery}%</span>
                     </div>
                   </div>
@@ -479,7 +507,7 @@ export default function Home() {
                 </div>
 
                 {editingId === animal.id && (
-                  <div className="mt-4 grid grid-cols-1 gap-3 rounded-2xl bg-gray-50 p-4 md:grid-cols-[1.5fr_1fr_140px_auto_auto]">
+                  <div className="mt-4 grid grid-cols-1 gap-3 rounded-2xl bg-gray-50 p-4 md:grid-cols-[1.5fr_140px_auto_auto]">
                     <input
                       className="rounded-xl border border-gray-300 px-4 py-3 outline-none"
                       type="text"
@@ -487,16 +515,6 @@ export default function Home() {
                       onChange={(e) => setEditName(e.target.value)}
                       placeholder="Name"
                     />
-
-                    <select
-                      className="rounded-xl border border-gray-300 px-4 py-3 outline-none"
-                      value={editStatus}
-                      onChange={(e) => setEditStatus(e.target.value as AnimalStatus)}
-                    >
-                      <option value="ok">ok</option>
-                      <option value="warning">warning</option>
-                      <option value="alert">alert</option>
-                    </select>
 
                     <input
                       className="rounded-xl border border-gray-300 px-4 py-3 outline-none"
@@ -529,4 +547,3 @@ export default function Home() {
     </main>
   )
 }
-
