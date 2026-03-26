@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 type AnimalStatus = 'healthy' | 'watchlist' | 'critical'
+type NoteType = 'note' | 'health' | 'treatment' | 'check'
 
 type DbAnimal = {
   id: string
@@ -11,6 +12,14 @@ type DbAnimal = {
   ear_tag: string | null
   group_name: string | null
   status: string | null
+  created_at: string | null
+}
+
+type DbNote = {
+  id: string
+  animal_id: string | null
+  text: string | null
+  type: string | null
   created_at: string | null
 }
 
@@ -23,6 +32,14 @@ type Animal = {
   createdAt: string | null
 }
 
+type Note = {
+  id: string
+  animalId: string
+  text: string
+  type: NoteType
+  createdAt: string | null
+}
+
 type FilterStatus = 'all' | AnimalStatus
 
 function normalizeStatus(value: string | null | undefined): AnimalStatus {
@@ -30,6 +47,13 @@ function normalizeStatus(value: string | null | undefined): AnimalStatus {
     return value
   }
   return 'healthy'
+}
+
+function normalizeNoteType(value: string | null | undefined): NoteType {
+  if (value === 'note' || value === 'health' || value === 'treatment' || value === 'check') {
+    return value
+  }
+  return 'note'
 }
 
 function statusLabel(status: AnimalStatus) {
@@ -58,6 +82,32 @@ function statusClass(status: AnimalStatus) {
   }
 }
 
+function noteTypeLabel(type: NoteType) {
+  switch (type) {
+    case 'health':
+      return 'Hälsa'
+    case 'treatment':
+      return 'Behandling'
+    case 'check':
+      return 'Kontroll'
+    default:
+      return 'Notering'
+  }
+}
+
+function noteTypeClass(type: NoteType) {
+  switch (type) {
+    case 'health':
+      return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+    case 'treatment':
+      return 'border-blue-500/20 bg-blue-500/10 text-blue-300'
+    case 'check':
+      return 'border-amber-500/20 bg-amber-500/10 text-amber-300'
+    default:
+      return 'border-white/10 bg-white/5 text-slate-300'
+  }
+}
+
 function formatDate(value: string | null) {
   if (!value) return 'Okänt datum'
 
@@ -68,6 +118,8 @@ function formatDate(value: string | null) {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(date)
 }
 
@@ -78,7 +130,7 @@ function Sidebar() {
         <div className="text-xs uppercase tracking-[0.28em] text-slate-500">Bionimal Pulse</div>
         <div className="mt-2 text-2xl font-semibold text-white">Farm Admin</div>
         <p className="mt-3 text-sm leading-6 text-slate-400">
-          Enkel driftpanel för registrering, sökning och översikt av djur.
+          Enkel driftpanel för registrering, uppföljning och historik per djur.
         </p>
       </div>
 
@@ -88,21 +140,14 @@ function Sidebar() {
             Djuröversikt
           </div>
           <div className="rounded-2xl px-4 py-3 text-slate-500">Uppgifter</div>
-          <div className="rounded-2xl px-4 py-3 text-slate-500">Dokument</div>
+          <div className="rounded-2xl px-4 py-3 text-slate-500">Historik</div>
           <div className="rounded-2xl px-4 py-3 text-slate-500">Inställningar</div>
         </div>
 
         <div className="mt-8 rounded-3xl border border-white/10 bg-white/5 p-5">
-          <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Status</div>
+          <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Version</div>
           <div className="mt-3 text-sm leading-6 text-slate-300">
-            Första versionen fokuserar på stabil registrering, sökning och tydlig överblick.
-          </div>
-        </div>
-
-        <div className="mt-6 rounded-3xl border border-emerald-500/10 bg-emerald-500/5 p-5">
-          <div className="text-sm uppercase tracking-[0.2em] text-emerald-300">Tips</div>
-          <div className="mt-3 text-sm leading-6 text-slate-300">
-            Nästa naturliga steg är redigera, ta bort, anteckningar och uppgifter per djur.
+            Nu med noteringar per djur för att börja bygga riktig uppföljning över tid.
           </div>
         </div>
       </div>
@@ -159,8 +204,11 @@ function EmptyState() {
 
 export default function Page() {
   const [animals, setAnimals] = useState<Animal[]>([])
+  const [notes, setNotes] = useState<Note[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [noteSavingId, setNoteSavingId] = useState<string | null>(null)
+
   const [errorMessage, setErrorMessage] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
 
@@ -174,21 +222,20 @@ export default function Page() {
     status: 'healthy' as AnimalStatus,
   })
 
-  async function loadAnimals() {
-    setLoading(true)
-    setErrorMessage('')
+  const [openNoteAnimalId, setOpenNoteAnimalId] = useState<string | null>(null)
+  const [noteForm, setNoteForm] = useState({
+    text: '',
+    type: 'note' as NoteType,
+  })
 
+  async function loadAnimals() {
     const { data, error } = await supabase
       .from('animals')
       .select('id, name, ear_tag, group_name, status, created_at')
       .order('created_at', { ascending: false })
 
     if (error) {
-      console.error('loadAnimals error:', error)
-      setAnimals([])
-      setErrorMessage(`Kunde inte hämta djur: ${error.message}`)
-      setLoading(false)
-      return
+      throw error
     }
 
     const mapped: Animal[] = ((data ?? []) as DbAnimal[]).map((animal) => ({
@@ -201,11 +248,49 @@ export default function Page() {
     }))
 
     setAnimals(mapped)
-    setLoading(false)
+  }
+
+  async function loadNotes() {
+    const { data, error } = await supabase
+      .from('notes')
+      .select('id, animal_id, text, type, created_at')
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      throw error
+    }
+
+    const mapped: Note[] = ((data ?? []) as DbNote[])
+      .filter((note) => note.animal_id)
+      .map((note) => ({
+        id: note.id,
+        animalId: note.animal_id as string,
+        text: note.text ?? '',
+        type: normalizeNoteType(note.type),
+        createdAt: note.created_at ?? null,
+      }))
+
+    setNotes(mapped)
+  }
+
+  async function loadAll() {
+    setLoading(true)
+    setErrorMessage('')
+
+    try {
+      await Promise.all([loadAnimals(), loadNotes()])
+    } catch (error: any) {
+      console.error('loadAll error:', error)
+      setErrorMessage(`Kunde inte hämta data: ${error.message}`)
+      setAnimals([])
+      setNotes([])
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
-    loadAnimals()
+    loadAll()
   }, [])
 
   function resetForm() {
@@ -214,6 +299,13 @@ export default function Page() {
       earTag: '',
       groupName: '',
       status: 'healthy',
+    })
+  }
+
+  function resetNoteForm() {
+    setNoteForm({
+      text: '',
+      type: 'note',
     })
   }
 
@@ -251,14 +343,49 @@ export default function Page() {
     setSaving(false)
 
     if (error) {
-      console.error('insert error:', error)
+      console.error('insert animal error:', error)
       setErrorMessage(`Kunde inte spara djuret: ${error.message}`)
       return
     }
 
     setSuccessMessage('Djuret sparades.')
     resetForm()
-    await loadAnimals()
+    await loadAll()
+  }
+
+  async function handleNoteSubmit(animalId: string) {
+    setErrorMessage('')
+    setSuccessMessage('')
+
+    const text = noteForm.text.trim()
+
+    if (!text) {
+      setErrorMessage('Du måste skriva en notering.')
+      return
+    }
+
+    setNoteSavingId(animalId)
+
+    const payload = {
+      animal_id: animalId,
+      text,
+      type: noteForm.type,
+    }
+
+    const { error } = await supabase.from('notes').insert([payload])
+
+    setNoteSavingId(null)
+
+    if (error) {
+      console.error('insert note error:', error)
+      setErrorMessage(`Kunde inte spara noteringen: ${error.message}`)
+      return
+    }
+
+    setSuccessMessage('Noteringen sparades.')
+    resetNoteForm()
+    setOpenNoteAnimalId(null)
+    await loadNotes()
   }
 
   const healthyCount = useMemo(
@@ -292,6 +419,10 @@ export default function Page() {
     })
   }, [animals, query, filterStatus])
 
+  function getNotesForAnimal(animalId: string) {
+    return notes.filter((note) => note.animalId === animalId)
+  }
+
   return (
     <main className="min-h-screen bg-[#08111d] text-white">
       <div className="flex min-h-screen">
@@ -316,15 +447,11 @@ export default function Page() {
             <section className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
               <MetricCard title="Totalt" value={animals.length} />
               <MetricCard title="Friska" value={healthyCount} valueClassName="text-emerald-400" />
-              <MetricCard
-                title="Bevakning"
-                value={watchlistCount}
-                valueClassName="text-amber-400"
-              />
+              <MetricCard title="Bevakning" value={watchlistCount} valueClassName="text-amber-400" />
               <MetricCard title="Kritiska" value={criticalCount} valueClassName="text-red-400" />
             </section>
 
-            <section className="grid grid-cols-1 gap-6 2xl:grid-cols-[0.9fr_1.1fr]">
+            <section className="grid grid-cols-1 gap-6 2xl:grid-cols-[0.85fr_1.15fr]">
               <div className="rounded-[2rem] border border-white/10 bg-[#0c1726] p-8 shadow-2xl">
                 <div className="text-sm uppercase tracking-[0.24em] text-slate-500">Registrering</div>
                 <h2 className="mt-2 text-3xl font-semibold text-white">Lägg till djur</h2>
@@ -335,12 +462,7 @@ export default function Page() {
                 <form onSubmit={handleSubmit} className="mt-6 grid gap-4 md:grid-cols-2">
                   <input
                     value={form.name}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        name: e.target.value,
-                      }))
-                    }
+                    onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
                     placeholder="Namn"
                     required
                     className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none placeholder:text-slate-500"
@@ -348,24 +470,14 @@ export default function Page() {
 
                   <input
                     value={form.earTag}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        earTag: e.target.value,
-                      }))
-                    }
+                    onChange={(e) => setForm((prev) => ({ ...prev, earTag: e.target.value }))}
                     placeholder="Öronmärke"
                     className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none placeholder:text-slate-500"
                   />
 
                   <input
                     value={form.groupName}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        groupName: e.target.value,
-                      }))
-                    }
+                    onChange={(e) => setForm((prev) => ({ ...prev, groupName: e.target.value }))}
                     placeholder="Ladugård"
                     required
                     className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none placeholder:text-slate-500"
@@ -374,10 +486,7 @@ export default function Page() {
                   <select
                     value={form.status}
                     onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        status: e.target.value as AnimalStatus,
-                      }))
+                      setForm((prev) => ({ ...prev, status: e.target.value as AnimalStatus }))
                     }
                     className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none"
                   >
@@ -412,7 +521,7 @@ export default function Page() {
                     <div className="text-sm uppercase tracking-[0.24em] text-slate-500">Register</div>
                     <h2 className="mt-2 text-3xl font-semibold text-white">Sparade djur</h2>
                     <p className="mt-2 text-sm text-slate-400">
-                      Sök bland djur och filtrera på status.
+                      Sök bland djur och logga historik per individ.
                     </p>
                   </div>
 
@@ -437,50 +546,145 @@ export default function Page() {
                   </div>
                 </div>
 
-                <div className="mt-6 space-y-3">
+                <div className="mt-6 space-y-4">
                   {loading ? (
                     <div className="rounded-2xl border border-white/10 bg-[#0a1320] p-5 text-slate-400">
-                      Laddar djur...
+                      Laddar data...
                     </div>
                   ) : filteredAnimals.length === 0 ? (
                     <EmptyState />
                   ) : (
-                    filteredAnimals.map((animal) => (
-                      <div
-                        key={animal.id}
-                        className="rounded-3xl border border-white/10 bg-[#0a1320] p-5"
-                      >
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                          <div>
-                            <div className="flex flex-wrap items-center gap-3">
-                              <div className="text-xl font-semibold text-white">{animal.name}</div>
-                              <span
-                                className={`rounded-full border px-3 py-1 text-sm ${statusClass(animal.status)}`}
-                              >
-                                {statusLabel(animal.status)}
-                              </span>
+                    filteredAnimals.map((animal) => {
+                      const animalNotes = getNotesForAnimal(animal.id)
+
+                      return (
+                        <div
+                          key={animal.id}
+                          className="rounded-3xl border border-white/10 bg-[#0a1320] p-5"
+                        >
+                          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-3">
+                                <div className="text-xl font-semibold text-white">{animal.name}</div>
+                                <span
+                                  className={`rounded-full border px-3 py-1 text-sm ${statusClass(animal.status)}`}
+                                >
+                                  {statusLabel(animal.status)}
+                                </span>
+                              </div>
+
+                              <div className="mt-3 grid gap-1 text-sm text-slate-400">
+                                <div>Öronmärke: {animal.earTag || '–'}</div>
+                                <div>Ladugård: {animal.groupName || '–'}</div>
+                                <div>Skapad: {formatDate(animal.createdAt)}</div>
+                              </div>
                             </div>
 
-                            <div className="mt-3 grid gap-1 text-sm text-slate-400">
-                              <div>Öronmärke: {animal.earTag || '–'}</div>
-                              <div>Ladugård: {animal.groupName || '–'}</div>
-                              <div>Skapad: {formatDate(animal.createdAt)}</div>
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (openNoteAnimalId === animal.id) {
+                                  setOpenNoteAnimalId(null)
+                                  resetNoteForm()
+                                } else {
+                                  setOpenNoteAnimalId(animal.id)
+                                  resetNoteForm()
+                                }
+                              }}
+                              className="rounded-2xl border border-[#c8a96b]/20 bg-[#c8a96b]/10 px-4 py-3 text-sm text-[#eddcb8] transition hover:bg-[#c8a96b]/20"
+                            >
+                              {openNoteAnimalId === animal.id ? 'Stäng notering' : 'Lägg till notering'}
+                            </button>
                           </div>
 
-                          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
-                            Aktiv post
+                          {openNoteAnimalId === animal.id ? (
+                            <div className="mt-5 rounded-3xl border border-white/10 bg-[#08111d] p-4">
+                              <div className="grid gap-3 md:grid-cols-[180px_1fr_auto]">
+                                <select
+                                  value={noteForm.type}
+                                  onChange={(e) =>
+                                    setNoteForm((prev) => ({
+                                      ...prev,
+                                      type: e.target.value as NoteType,
+                                    }))
+                                  }
+                                  className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none"
+                                >
+                                  <option value="note">Notering</option>
+                                  <option value="health">Hälsa</option>
+                                  <option value="treatment">Behandling</option>
+                                  <option value="check">Kontroll</option>
+                                </select>
+
+                                <input
+                                  value={noteForm.text}
+                                  onChange={(e) =>
+                                    setNoteForm((prev) => ({
+                                      ...prev,
+                                      text: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="Skriv en notering för detta djur"
+                                  className="rounded-2xl border border-white/10 bg-[#0a1320] px-4 py-3 text-white outline-none placeholder:text-slate-500"
+                                />
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleNoteSubmit(animal.id)}
+                                  disabled={noteSavingId === animal.id}
+                                  className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-5 py-3 text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-60"
+                                >
+                                  {noteSavingId === animal.id ? 'Sparar...' : 'Spara'}
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
+
+                          <div className="mt-5">
+                            <div className="mb-3 text-sm uppercase tracking-[0.2em] text-slate-500">
+                              Historik
+                            </div>
+
+                            {animalNotes.length === 0 ? (
+                              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-400">
+                                Inga noteringar ännu.
+                              </div>
+                            ) : (
+                              <div className="space-y-3">
+                                {animalNotes.map((note) => (
+                                  <div
+                                    key={note.id}
+                                    className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                                  >
+                                    <div className="flex flex-wrap items-center gap-3">
+                                      <span
+                                        className={`rounded-full border px-3 py-1 text-xs ${noteTypeClass(note.type)}`}
+                                      >
+                                        {noteTypeLabel(note.type)}
+                                      </span>
+                                      <span className="text-xs text-slate-500">
+                                        {formatDate(note.createdAt)}
+                                      </span>
+                                    </div>
+
+                                    <div className="mt-3 text-sm leading-6 text-slate-200">
+                                      {note.text}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
-                      </div>
-                    ))
+                      )
+                    })
                   )}
                 </div>
               </div>
             </section>
 
             <div className="mt-8 rounded-[2rem] border border-[#c8a96b]/20 bg-[#c8a96b]/10 p-6 text-[#eddcb8]">
-              Nästa steg: redigera djur, ta bort djur, anteckningar per djur och uppgifter kopplade till varje individ.
+              Nästa steg: redigera status direkt i listan, ta bort djur och lägga till ansvarig person per notering.
             </div>
           </div>
         </div>
